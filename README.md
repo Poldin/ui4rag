@@ -1,36 +1,108 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# UI4RAG - RAG Content Management Interface
+
+A beautiful, Notion-inspired interface for managing your RAG (Retrieval-Augmented Generation) content.
+
+## Features
+
+- 🎨 Clean, Notion-inspired UI
+- 🔐 Supabase authentication with OTP
+- 📊 Multiple content sources (Text, Website, Docs, Q&A, Notion)
+- 🗄️ Connect your own vector database (PostgreSQL/pgvector)
+- 🤖 AI embeddings configuration (OpenAI)
+- 📱 Mobile-friendly responsive design
 
 ## Getting Started
 
-First, run the development server:
+### 1. Install Dependencies
+
+```bash
+npm install
+```
+
+### 2. Set Up Supabase
+
+1. Create a project at [supabase.com](https://supabase.com)
+2. Get your project URL and anon key from Settings > API
+3. Create a `.env.local` file:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=your-project-url.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+```
+
+### 3. Configure Supabase Email Templates (Optional)
+
+For OTP emails to work properly, configure your email templates in Supabase:
+- Go to Authentication > Email Templates
+- Customize the "Confirm signup" template
+
+### 4. Run Development Server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000) to see the application.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Project Structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+app/
+├── page.tsx              # Landing page
+├── signin/page.tsx       # Sign in page
+├── signup/page.tsx       # Sign up page with OTP
+├── pricing/page.tsx      # Pricing page
+├── app/
+│   ├── page.tsx          # RAG dashboard
+│   ├── [id]/
+│   │   ├── config/       # Configuration page
+│   │   ├── profile/      # User profile
+│   │   └── sources/      # Content sources (text, website, docs, qa, notion)
+│   └── layout.tsx        # App layout with sidebar
+├── components/
+│   └── Sidebar.tsx       # Navigation sidebar
+└── lib/
+    └── supabase.ts       # Supabase client configuration
+```
 
-## Learn More
+## Configuration
 
-To learn more about Next.js, take a look at the following resources:
+### Vector Database
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Create a PostgreSQL database with pgvector extension (Supabase includes this by default)
+2. Run the SQL provided in the Config page to create the required table
+3. Add your connection string in the Config page
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### AI Embeddings
 
-## Deploy on Vercel
+1. Get an API key from [OpenAI](https://platform.openai.com/api-keys)
+2. Choose your embedding model and dimensions
+3. Add your API key in the Config page
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Authentication Flow
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. **Sign Up**: User enters email and password
+2. **OTP Sent**: Verification code sent to email
+3. **Verify**: User enters 6-digit code
+4. **Complete**: Redirect to sign in page
+5. **Sign In**: User can now access the app
+
+## Tech Stack
+
+- **Framework**: Next.js 15 (App Router)
+- **Styling**: Tailwind CSS
+- **Icons**: Lucide React
+- **Authentication**: Supabase Auth with OTP
+- **Database**: PostgreSQL with pgvector (user-provided)
+- **AI**: OpenAI Embeddings API (user-provided)
+
+## Notes
+
+- The proxy for Supabase auth is configured in `next.config.ts` using rewrites
+- All user data stays in the user's own database
+- This is a UI-only application - no backend data storage
+
+## License
+
+MIT
