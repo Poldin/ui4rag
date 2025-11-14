@@ -41,20 +41,20 @@ export type Database = {
     Tables: {
       crawling_logs: {
         Row: {
-          id: string
           created_at: string
+          id: string
           metadata: Json | null
           rag_id: string | null
         }
         Insert: {
-          id?: string
           created_at?: string
+          id?: string
           metadata?: Json | null
           rag_id?: string | null
         }
         Update: {
-          id?: string
           created_at?: string
+          id?: string
           metadata?: Json | null
           rag_id?: string | null
         }

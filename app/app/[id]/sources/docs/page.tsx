@@ -1,8 +1,11 @@
 'use client';
 
 import { useState, useRef } from "react";
+import { useParams } from "next/navigation";
 import { Upload, Loader2, Check, X } from "lucide-react";
 import PendingChanges from "../../../../components/PendingChanges";
+import { addToPendingChanges } from "../../../../../lib/actions/pending-changes";
+import { pendingChangesEvents } from "../../../../../lib/events/pending-changes-events";
 
 interface DocumentData {
   id: string;
@@ -19,10 +22,14 @@ interface DocumentData {
 }
 
 export default function DocsSourcePage() {
+  const params = useParams();
+  const ragId = params.id as string;
   const [documents, setDocuments] = useState<DocumentData[]>([]);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   const handleFileSelect = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
@@ -111,9 +118,53 @@ export default function DocsSourcePage() {
   const totalWords = selectedDocs.reduce((sum, doc) => sum + doc.wordCount, 0);
   const estimatedTokens = Math.ceil(totalWords * 1.33);
 
-  const handleSave = () => {
-    // TODO: Implementare salvataggio nel database
-    console.log('Ready to send documents to training', selectedDocs);
+  const handleSave = async () => {
+    if (selectedDocs.length === 0) return;
+    
+    setSaving(true);
+    setSaveSuccess(false);
+
+    try {
+      const items = selectedDocs.map(doc => ({
+        type: 'docs' as const,
+        title: doc.title || doc.filename,
+        preview: doc.textPreview,
+        content: {
+          filename: doc.filename,
+          fileType: doc.fileType,
+          pages: doc.pages,
+          text: doc.fullText,
+          title: doc.title,
+        },
+        metadata: {
+          wordCount: doc.wordCount,
+          tokens: Math.ceil(doc.wordCount * 1.33),
+          fileSize: doc.fileSize,
+          fileSizeBytes: doc.fileSizeBytes,
+          pages: doc.pages,
+        },
+      }));
+
+      const result = await addToPendingChanges(ragId, items);
+
+      if (result.success) {
+        setSaveSuccess(true);
+        // Notifica il componente PendingChanges
+        pendingChangesEvents.emit();
+        // Rimuovi i documenti selezionati dopo 1 secondo
+        setTimeout(() => {
+          setDocuments(prev => prev.filter(doc => !doc.selected));
+          setSaveSuccess(false);
+        }, 1000);
+      } else {
+        alert(`Error: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Failed to save:', error);
+      alert('Failed to add to training');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -211,9 +262,19 @@ export default function DocsSourcePage() {
                 <div className="flex flex-col gap-1.5">
                   <button
                     onClick={handleSave}
-                    className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors w-fit"
+                    disabled={saving}
+                    className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors w-fit disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
                   >
-                    Send to training ({selectedDocs.length} {selectedDocs.length === 1 ? 'document' : 'documents'})
+                    {saving ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : saveSuccess ? (
+                      <span>✓ Added to training!</span>
+                    ) : (
+                      <span>Send to training ({selectedDocs.length} {selectedDocs.length === 1 ? 'document' : 'documents'})</span>
+                    )}
                   </button>
                   <p className="text-xs text-gray-500">
                     {totalWords.toLocaleString()} words • ~{estimatedTokens.toLocaleString()} tokens
@@ -291,9 +352,19 @@ export default function DocsSourcePage() {
                 <div className="flex flex-col gap-1.5">
                   <button
                     onClick={handleSave}
-                    className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors w-fit"
+                    disabled={saving}
+                    className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors w-fit disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
                   >
-                    Send to training ({selectedDocs.length} {selectedDocs.length === 1 ? 'document' : 'documents'})
+                    {saving ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Saving...</span>
+                      </>
+                    ) : saveSuccess ? (
+                      <span>✓ Added to training!</span>
+                    ) : (
+                      <span>Send to training ({selectedDocs.length} {selectedDocs.length === 1 ? 'document' : 'documents'})</span>
+                    )}
                   </button>
                   <p className="text-xs text-gray-500">
                     {totalWords.toLocaleString()} words • ~{estimatedTokens.toLocaleString()} tokens
@@ -304,7 +375,7 @@ export default function DocsSourcePage() {
           )}
         </div>
       </div>
-      <PendingChanges />
+      <PendingChanges alwaysVisible={true} />
     </div>
   );
 }

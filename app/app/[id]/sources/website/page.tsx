@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import PendingChanges from "../../../../components/PendingChanges";
 import { Loader2, Check, X, Globe } from 'lucide-react';
+import { addToPendingChanges } from "../../../../../lib/actions/pending-changes";
+import { pendingChangesEvents } from "../../../../../lib/events/pending-changes-events";
 
 interface PageData {
   url: string;
@@ -29,6 +31,8 @@ export default function WebsiteSourcePage() {
   const crawlStartTimeRef = useRef<number>(0);
   const stoppedManuallyRef = useRef(false);
   const allPagesFoundRef = useRef<PageData[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Funzione per determinare quante pagine mostrare nel prossimo batch
   const getNextBatchSize = (currentDisplayed: number): number => {
@@ -243,6 +247,54 @@ export default function WebsiteSourcePage() {
   // Stima approssimativa: 1 token ≈ 0.75 parole (per l'inglese)
   const estimatedTokens = Math.ceil(totalWords * 1.33);
 
+  const handleSendToTraining = async () => {
+    if (selectedCount === 0) return;
+    
+    setSaving(true);
+    setSaveSuccess(false);
+
+    try {
+      const selectedPages = pages.filter(p => p.selected);
+      const items = selectedPages.map(page => ({
+        type: 'website' as const,
+        title: page.title || page.url,
+        preview: page.description || `Scraped from ${page.url}`,
+        content: {
+          url: page.url,
+          title: page.title,
+          description: page.description,
+          depth: page.depth,
+        },
+        metadata: {
+          wordCount: page.wordCount,
+          tokens: Math.ceil(page.wordCount * 1.33),
+          url: page.url,
+          depth: page.depth,
+        },
+      }));
+
+      const result = await addToPendingChanges(ragId, items);
+
+      if (result.success) {
+        setSaveSuccess(true);
+        // Notifica il componente PendingChanges
+        pendingChangesEvents.emit();
+        // Rimuovi le pagine selezionate dopo 1 secondo
+        setTimeout(() => {
+          setPages(prev => prev.filter(p => !p.selected));
+          setSaveSuccess(false);
+        }, 1000);
+      } else {
+        alert(`Error: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Failed to save:', error);
+      alert('Failed to add to training');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="h-full flex flex-col relative">
       {/* Header */}
@@ -386,14 +438,20 @@ export default function WebsiteSourcePage() {
               {/* Send to training button - top */}
               <div className="flex flex-col gap-1.5">
                 <button
-                  onClick={() => {
-                    // TODO: Implementare salvataggio nel database
-                    alert(`Ready to send ${selectedCount} pages to training`);
-                  }}
-                  disabled={selectedCount === 0}
-                  className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed w-fit"
+                  onClick={handleSendToTraining}
+                  disabled={selectedCount === 0 || saving}
+                  className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed w-fit flex items-center gap-2"
                 >
-                  Send to training ({selectedCount} {selectedCount === 1 ? 'page' : 'pages'})
+                  {saving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : saveSuccess ? (
+                    <span>✓ Added to training!</span>
+                  ) : (
+                    <span>Send to training ({selectedCount} {selectedCount === 1 ? 'page' : 'pages'})</span>
+                  )}
                 </button>
                 {selectedCount > 0 && (
                   <p className="text-xs text-gray-500">
@@ -458,14 +516,20 @@ export default function WebsiteSourcePage() {
               {/* Send to training button - bottom */}
               <div className="flex flex-col gap-1.5">
                 <button
-                  onClick={() => {
-                    // TODO: Implementare salvataggio nel database
-                    alert(`Ready to send ${selectedCount} pages to training`);
-                  }}
-                  disabled={selectedCount === 0}
-                  className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed w-fit"
+                  onClick={handleSendToTraining}
+                  disabled={selectedCount === 0 || saving}
+                  className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed w-fit flex items-center gap-2"
                 >
-                  Send to training ({selectedCount} {selectedCount === 1 ? 'page' : 'pages'})
+                  {saving ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : saveSuccess ? (
+                    <span>✓ Added to training!</span>
+                  ) : (
+                    <span>Send to training ({selectedCount} {selectedCount === 1 ? 'page' : 'pages'})</span>
+                  )}
                 </button>
                 {selectedCount > 0 && (
                   <p className="text-xs text-gray-500">
@@ -477,7 +541,7 @@ export default function WebsiteSourcePage() {
           )}
         </div>
       </div>
-      <PendingChanges />
+      <PendingChanges alwaysVisible={true} />
     </div>
   );
 }

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "UI 4 RAG",
-  description: "Manage your RAG content sources and configuration",
+  title: "Gimme_RAG - Create and manage RAGs. Easy and cheap.",
+  description: "Create and manage RAGs easily. Connect your vector database, configure AI embeddings, and manage all your content sources in one beautiful interface.",
 };
 
 export default function RootLayout({

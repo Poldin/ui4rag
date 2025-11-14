@@ -48,7 +48,7 @@ export default function NewRagPage() {
             embeddingDimensions: 1536,
             vectorDb: "postgresql",
             connectionString: "",
-            tableName: "ui4rag_documents",
+            tableName: "gimme_rag_documents",
           },
           pending_changes: null,
         })

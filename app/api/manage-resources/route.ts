@@ -1,22 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerSupabaseClient } from '../../../lib/supabase-server';
-import { Pool } from 'pg';
-
-// Funzione per fare URL-encoding della password nel connection string
-function encodeConnectionString(connStr: string): string {
-  try {
-    const url = new URL(connStr);
-    if (url.password) {
-      const decodedPassword = decodeURIComponent(url.password);
-      const encodedPassword = encodeURIComponent(decodedPassword);
-      url.password = encodedPassword;
-      return url.toString();
-    }
-    return connStr;
-  } catch (error) {
-    return connStr;
-  }
-}
+import { RAGStorage, type RAGStorageConfig } from '../../../lib/ai-sdk/rag-storage';
+import { createEmbeddingConfig } from '../../../lib/ai-sdk/embeddings';
 
 export async function GET(request: NextRequest) {
   try {
@@ -58,43 +43,91 @@ export async function GET(request: NextRequest) {
 
     const config = ragData.config as any;
 
+    console.log('📋 Config loaded in manage-resources:', {
+      hasConnectionString: !!config?.connectionString,
+      sourcesTableName: config?.sourcesTableName,
+      chunksTableName: config?.chunksTableName,
+      hasApiKey: !!config?.apiKey,
+    });
+
     // Verifica che la configurazione sia completa
-    if (!config?.connectionString || !config?.tableName) {
+    if (!config?.connectionString) {
       return NextResponse.json(
         { error: 'Database configuration incomplete', configMissing: true },
         { status: 400 }
       );
     }
 
-    // Connetti al database PostgreSQL configurato
-    let pool: Pool | null = null;
+    // Ottieni nomi delle tabelle dalla config
+    const sourcesTableName = config.sourcesTableName || 'gimme_rag_sources';
+    const chunksTableName = config.chunksTableName || 'gimme_rag_chunks';
+    
+    console.log('📊 Using tables:', { sourcesTableName, chunksTableName });
+
+    // Configura RAGStorage
+    const embeddingConfig = createEmbeddingConfig(
+      config.apiKey || '',
+      config.embeddingModel || 'text-embedding-3-small',
+      config.embeddingDimensions || 1536
+    );
+
+    const storageConfig: RAGStorageConfig = {
+      connectionString: config.connectionString,
+      sourcesTableName,
+      chunksTableName,
+      embeddingConfig,
+      ssl: true,
+    };
+
+    const ragStorage = new RAGStorage(storageConfig);
+
     try {
-      // Applica encoding automatico alla password
-      const encodedConnectionString = encodeConnectionString(config.connectionString);
+      // Lista tutti i sources dalla tabella sources
+      const sources = await ragStorage.listSources(1000, 0);
       
-      pool = new Pool({
-        connectionString: encodedConnectionString,
-        ssl: encodedConnectionString.includes('supabase.co') || encodedConnectionString.includes('neon.tech')
-          ? { rejectUnauthorized: false }
-          : undefined,
+      console.log('✅ Sources loaded:', {
+        count: sources.length,
+        firstSource: sources[0] ? {
+          id: sources[0].id,
+          title: sources[0].title,
+          source_type: sources[0].source_type,
+        } : null,
       });
 
-      // Test connessione
-      await pool.query('SELECT 1');
+      // Ottieni il numero di chunks per ogni source
+      const chunksCountMap = await ragStorage.getChunksCountBySource();
 
-      // Query per ottenere le risorse dalla tabella
-      const result = await pool.query(
-        `SELECT id, content, metadata, created_at 
-         FROM ${config.tableName} 
-         ORDER BY created_at DESC 
-         LIMIT 1000`
-      );
+      // Ottieni statistiche
+      const stats = await ragStorage.getStats();
+      const sourcesByType = await ragStorage.countSourcesByType();
+      
+      console.log('📊 Stats:', stats);
 
       return NextResponse.json({
         success: true,
-        resources: result.rows,
-        tableName: config.tableName,
-        totalCount: result.rows.length
+        resources: sources.map((source) => ({
+          id: source.id,
+          title: source.title,
+          content: source.content.substring(0, 200) + '...', // Preview
+          source_type: source.source_type,
+          metadata: {
+            ...source.metadata,
+            source_type: source.source_type, // Assicura che source_type sia anche in metadata per compatibilità UI
+            chunkCount: chunksCountMap.get(source.id) || 0, // Aggiungi il numero di chunks
+          },
+          created_at: source.created_at,
+        })),
+        stats: {
+          totalSources: stats.totalSources,
+          totalChunks: stats.totalChunks,
+          chunksWithEmbeddings: stats.chunksWithEmbeddings,
+          sourcesByType,
+        },
+        tables: {
+          sources: sourcesTableName,
+          chunks: chunksTableName,
+        },
+        usedAISDK: true,
       });
 
     } catch (dbError: any) {
@@ -108,9 +141,7 @@ export async function GET(request: NextRequest) {
         { status: 500 }
       );
     } finally {
-      if (pool) {
-        await pool.end();
-      }
+      await ragStorage.close();
     }
 
   } catch (error: any) {
@@ -162,36 +193,60 @@ export async function DELETE(request: NextRequest) {
 
     const config = ragData.config as any;
 
-    if (!config?.connectionString || !config?.tableName) {
+    console.log('📋 Config loaded in DELETE:', {
+      hasConnectionString: !!config?.connectionString,
+      sourcesTableName: config?.sourcesTableName,
+      chunksTableName: config?.chunksTableName,
+      hasApiKey: !!config?.apiKey,
+    });
+
+    // Verifica che la configurazione sia completa
+    if (!config?.connectionString) {
       return NextResponse.json(
-        { error: 'Database configuration incomplete' },
+        { error: 'Database configuration incomplete', configMissing: true },
         { status: 400 }
       );
     }
 
-    // Connetti al database PostgreSQL configurato
-    let pool: Pool | null = null;
-    try {
-      // Applica encoding automatico alla password
-      const encodedConnectionString = encodeConnectionString(config.connectionString);
-      
-      pool = new Pool({
-        connectionString: encodedConnectionString,
-        ssl: encodedConnectionString.includes('supabase.co') || encodedConnectionString.includes('neon.tech')
-          ? { rejectUnauthorized: false }
-          : undefined,
-      });
+    // Ottieni nomi delle tabelle dalla config
+    const sourcesTableName = config.sourcesTableName || 'gimme_rag_sources';
+    const chunksTableName = config.chunksTableName || 'gimme_rag_chunks';
+    
+    console.log('📊 Using tables for DELETE:', { sourcesTableName, chunksTableName });
 
-      // Elimina le risorse
-      const placeholders = resourceIds.map((_, i) => `$${i + 1}`).join(', ');
-      const result = await pool.query(
-        `DELETE FROM ${config.tableName} WHERE id IN (${placeholders})`,
-        resourceIds
-      );
+    // Configura RAGStorage
+    const embeddingConfig = createEmbeddingConfig(
+      config.apiKey || '',
+      config.embeddingModel || 'text-embedding-3-small',
+      config.embeddingDimensions || 1536
+    );
+
+    const storageConfig: RAGStorageConfig = {
+      connectionString: config.connectionString,
+      sourcesTableName,
+      chunksTableName,
+      embeddingConfig,
+      ssl: true,
+    };
+
+    const ragStorage = new RAGStorage(storageConfig);
+
+    try {
+      // Elimina tutti i sources (i chunks verranno eliminati automaticamente con CASCADE)
+      let deletedCount = 0;
+      for (const sourceId of resourceIds) {
+        try {
+          await ragStorage.deleteSource(sourceId);
+          deletedCount++;
+        } catch (deleteError) {
+          console.error(`Failed to delete source ${sourceId}:`, deleteError);
+        }
+      }
 
       return NextResponse.json({
         success: true,
-        deletedCount: result.rowCount || 0
+        deletedCount,
+        usedAISDK: true,
       });
 
     } catch (dbError: any) {
@@ -201,9 +256,7 @@ export async function DELETE(request: NextRequest) {
         { status: 500 }
       );
     } finally {
-      if (pool) {
-        await pool.end();
-      }
+      await ragStorage.close();
     }
 
   } catch (error: any) {
@@ -214,4 +267,3 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
-

@@ -1,4 +1,4 @@
-# UI4RAG - RAG Content Management Interface
+# Gimme_RAG - Create and manage RAGs. Easy and cheap.
 
 A beautiful, Notion-inspired interface for managing your RAG (Retrieval-Augmented Generation) content.
 

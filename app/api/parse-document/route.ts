@@ -43,29 +43,51 @@ export async function POST(request: NextRequest) {
       // File di testo semplice
       extractedText = buffer.toString('utf-8');
     } else if (fileExtension === 'pdf') {
-      // Per ora simuliamo - in produzione useresti pdf-parse
-      // const pdf = require('pdf-parse');
-      // const data = await pdf(buffer);
-      // extractedText = data.text;
-      // pages = data.numpages;
-      
-      // Simulazione per sviluppo
-      extractedText = `[PDF Content from ${file.name}]\n\nThis is simulated PDF content. In production, this would be the actual extracted text from the PDF file using a library like pdf-parse.\n\n`.repeat(10);
-      pages = 5;
+      // Estrazione reale da PDF usando unpdf (semplice e compatibile con bundler moderni)
+      try {
+        const { extractText, getDocumentProxy } = await import('unpdf');
+        
+        // Converti Buffer in Uint8Array (richiesto da pdfjs sotto il cofano)
+        const uint8Array = new Uint8Array(buffer);
+        
+        // Estrai il testo dal PDF - semplicissimo!
+        const data = await getDocumentProxy(uint8Array);
+        pages = data.numPages;
+        
+        // Estrai il testo
+        const pdfText = await extractText(data, { mergePages: true });
+        extractedText = pdfText.text;
+      } catch (pdfError: any) {
+        console.error('PDF parsing error details:', pdfError);
+        throw new Error(`Failed to parse PDF: ${pdfError.message}`);
+      }
     } else if (fileExtension === 'docx') {
-      // Per ora simuliamo - in produzione useresti mammoth
-      // const mammoth = require('mammoth');
-      // const result = await mammoth.extractRawText({ buffer });
-      // extractedText = result.value;
-      
-      // Simulazione per sviluppo
-      extractedText = `[DOCX Content from ${file.name}]\n\nThis is simulated DOCX content. In production, this would be the actual extracted text from the Word document using a library like mammoth.\n\n`.repeat(8);
-      pages = 3;
+      // Estrazione reale da DOCX usando mammoth (dynamic import per compatibilità Turbopack)
+      try {
+        const mammoth = await import('mammoth');
+        const result = await mammoth.extractRawText({ buffer });
+        extractedText = result.value;
+        // DOCX non ha un numero di pagine fisso, stimiamo
+        pages = Math.ceil(extractedText.length / 3000);
+      } catch (docxError: any) {
+        throw new Error(`Failed to parse DOCX: ${docxError.message}`);
+      }
     } else if (fileExtension === 'pptx') {
-      // Per ora simuliamo - in produzione useresti una libreria PPTX
-      // Simulazione per sviluppo
-      extractedText = `[PPTX Content from ${file.name}]\n\nThis is simulated PowerPoint content. In production, this would be the actual extracted text from the presentation.\n\n`.repeat(6);
-      pages = 12;
+      // Estrazione reale da PPTX usando officeparser (dynamic import per compatibilità Turbopack)
+      try {
+        const officeParser = (await import('officeparser')).default;
+        const text = await officeParser.parseOfficeAsync(buffer);
+        extractedText = text;
+        // PPTX: stimiamo le slide (circa 500 caratteri per slide)
+        pages = Math.max(1, Math.ceil(extractedText.length / 500));
+      } catch (pptxError: any) {
+        throw new Error(`Failed to parse PPTX: ${pptxError.message}`);
+      }
+    }
+
+    // Validazione: assicurati che il testo sia stato estratto
+    if (!extractedText || extractedText.trim().length === 0) {
+      throw new Error('No text could be extracted from the document. The file might be empty or corrupted.');
     }
 
     // Calcola statistiche
@@ -83,8 +105,8 @@ export async function POST(request: NextRequest) {
       wordCount: wordCount,
       textPreview: textPreview,
       fullText: extractedText,
-      // Cerca di estrarre un titolo dal contenuto o usa il filename
-      title: extractedText.split('\n')[0].substring(0, 100) || file.name.replace(/\.[^/.]+$/, '')
+      // Il titolo è semplicemente il nome del file senza estensione
+      title: file.name.replace(/\.[^/.]+$/, '')
     };
 
     return NextResponse.json({

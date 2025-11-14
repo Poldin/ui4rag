@@ -1,20 +1,67 @@
 'use client';
 
 import { useState } from "react";
+import { useParams } from "next/navigation";
 import PendingChanges from "../../../../components/PendingChanges";
+import { addToPendingChanges } from "../../../../../lib/actions/pending-changes";
+import { pendingChangesEvents } from "../../../../../lib/events/pending-changes-events";
+import { Loader2 } from "lucide-react";
 
 export default function TextSourcePage() {
+  const params = useParams();
+  const ragId = params.id as string;
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Calcola le statistiche
   const hasContent = content.trim().length > 0;
   const totalWords = content.trim().split(/\s+/).filter(w => w.length > 0).length;
   const estimatedTokens = Math.ceil(totalWords * 1.33);
 
-  const handleSave = () => {
-    // TODO: Implementare salvataggio nel database
-    console.log('Ready to send text to training', { title, content, totalWords, estimatedTokens });
+  const handleSave = async () => {
+    if (!hasContent) return;
+    
+    setSaving(true);
+    setSaveSuccess(false);
+
+    try {
+      const result = await addToPendingChanges(ragId, [
+        {
+          type: 'text',
+          title: title || 'Untitled Text',
+          preview: content.slice(0, 100) + (content.length > 100 ? '...' : ''),
+          content: {
+            title,
+            text: content,
+          },
+          metadata: {
+            wordCount: totalWords,
+            tokens: estimatedTokens,
+          },
+        },
+      ]);
+
+      if (result.success) {
+        setSaveSuccess(true);
+        // Notifica il componente PendingChanges
+        pendingChangesEvents.emit();
+        // Clear form dopo 1 secondo
+        setTimeout(() => {
+          setTitle('');
+          setContent('');
+          setSaveSuccess(false);
+        }, 1000);
+      } else {
+        alert(`Error: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Failed to save:', error);
+      alert('Failed to add to training');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleClear = () => {
@@ -41,9 +88,19 @@ export default function TextSourcePage() {
             <div className="flex flex-col gap-1.5">
               <button
                 onClick={handleSave}
-                className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors w-fit"
+                disabled={saving}
+                className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors w-fit disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                Send to training
+                {saving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : saveSuccess ? (
+                  <span>✓ Added to training!</span>
+                ) : (
+                  <span>Send to training</span>
+                )}
               </button>
               <p className="text-xs text-gray-500">
                 {totalWords.toLocaleString()} words • ~{estimatedTokens.toLocaleString()} tokens
@@ -78,9 +135,19 @@ export default function TextSourcePage() {
             <div className="flex flex-col gap-1.5">
               <button
                 onClick={handleSave}
-                className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors w-fit"
+                disabled={saving}
+                className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors w-fit disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                Send to training
+                {saving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : saveSuccess ? (
+                  <span>✓ Added to training!</span>
+                ) : (
+                  <span>Send to training</span>
+                )}
               </button>
               <p className="text-xs text-gray-500">
                 {totalWords.toLocaleString()} words • ~{estimatedTokens.toLocaleString()} tokens
@@ -98,7 +165,7 @@ export default function TextSourcePage() {
           )}
         </div>
       </div>
-      <PendingChanges />
+      <PendingChanges alwaysVisible={true} />
     </div>
   );
 }

@@ -1,8 +1,11 @@
 'use client';
 
 import { useState } from "react";
-import { Plus, X, Copy, Upload, Check } from "lucide-react";
+import { useParams } from "next/navigation";
+import { Plus, X, Copy, Upload, Check, Loader2 } from "lucide-react";
 import PendingChanges from "../../../../components/PendingChanges";
+import { addToPendingChanges } from "../../../../../lib/actions/pending-changes";
+import { pendingChangesEvents } from "../../../../../lib/events/pending-changes-events";
 
 interface QAPair {
   id: string;
@@ -11,6 +14,8 @@ interface QAPair {
 }
 
 export default function QASourcePage() {
+  const params = useParams();
+  const ragId = params.id as string;
   const [qaPairs, setQaPairs] = useState<QAPair[]>([
     { id: '1', questions: [''], answer: '' }
   ]);
@@ -19,6 +24,8 @@ export default function QASourcePage() {
   const [copiedPrompt, setCopiedPrompt] = useState(false);
   const [copiedStructure, setCopiedStructure] = useState(false);
   const [importError, setImportError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   const addQAPair = () => {
     setQaPairs([...qaPairs, { 
@@ -83,9 +90,55 @@ export default function QASourcePage() {
   }, 0);
   const estimatedTokens = Math.ceil(totalWords * 1.33);
 
-  const handleSave = () => {
-    // TODO: Implementare salvataggio nel database
-    console.log(`Ready to save ${activePairs.length} Q&A pairs to training`, activePairs);
+  const handleSave = async () => {
+    if (activePairs.length === 0) return;
+    
+    setSaving(true);
+    setSaveSuccess(false);
+
+    try {
+      const items = activePairs.map(pair => {
+        const allQuestions = pair.questions.filter(q => q.trim()).join(' | ');
+        const wordCount = pair.questions.reduce((sum, q) => {
+          return sum + q.trim().split(/\s+/).filter(w => w.length > 0).length;
+        }, 0) + pair.answer.trim().split(/\s+/).filter(w => w.length > 0).length;
+
+        return {
+          type: 'qa' as const,
+          title: pair.questions[0] || 'Q&A Pair',
+          preview: pair.answer.slice(0, 100) + (pair.answer.length > 100 ? '...' : ''),
+          content: {
+            questions: pair.questions.filter(q => q.trim()),
+            answer: pair.answer,
+          },
+          metadata: {
+            wordCount,
+            tokens: Math.ceil(wordCount * 1.33),
+            questionVariants: pair.questions.length,
+          },
+        };
+      });
+
+      const result = await addToPendingChanges(ragId, items);
+
+      if (result.success) {
+        setSaveSuccess(true);
+        // Notifica il componente PendingChanges
+        pendingChangesEvents.emit();
+        // Reset form dopo 1 secondo
+        setTimeout(() => {
+          setQaPairs([{ id: '1', questions: [''], answer: '' }]);
+          setSaveSuccess(false);
+        }, 1000);
+      } else {
+        alert(`Error: ${result.error}`);
+      }
+    } catch (error) {
+      console.error('Failed to save:', error);
+      alert('Failed to add to training');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const aiPrompt = `Generate a comprehensive Q&A dataset in JSON format. Each Q&A pair should have multiple question variants (different ways to ask the same thing) and a single answer.
@@ -186,9 +239,19 @@ Create Q&A pairs about [YOUR TOPIC HERE]. Include 3-5 question variants per answ
             <div className="flex flex-col gap-1.5">
               <button
                 onClick={handleSave}
-                className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors w-fit"
+                disabled={saving}
+                className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors w-fit disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                Send to training ({activePairs.length} {activePairs.length === 1 ? 'pair' : 'pairs'})
+                {saving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : saveSuccess ? (
+                  <span>✓ Added to training!</span>
+                ) : (
+                  <span>Send to training ({activePairs.length} {activePairs.length === 1 ? 'pair' : 'pairs'})</span>
+                )}
               </button>
               <p className="text-xs text-gray-500">
                 {totalWords.toLocaleString()} words • ~{estimatedTokens.toLocaleString()} tokens
@@ -276,9 +339,19 @@ Create Q&A pairs about [YOUR TOPIC HERE]. Include 3-5 question variants per answ
             <div className="flex flex-col gap-1.5">
               <button
                 onClick={handleSave}
-                className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors w-fit"
+                disabled={saving}
+                className="px-4 py-2 bg-black text-white text-sm rounded-md hover:bg-gray-800 transition-colors w-fit disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                Send to training ({activePairs.length} {activePairs.length === 1 ? 'pair' : 'pairs'})
+                {saving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : saveSuccess ? (
+                  <span>✓ Added to training!</span>
+                ) : (
+                  <span>Send to training ({activePairs.length} {activePairs.length === 1 ? 'pair' : 'pairs'})</span>
+                )}
               </button>
               <p className="text-xs text-gray-500">
                 {totalWords.toLocaleString()} words • ~{estimatedTokens.toLocaleString()} tokens
@@ -373,7 +446,7 @@ Create Q&A pairs about [YOUR TOPIC HERE]. Include 3-5 question variants per answ
         </div>
       )}
 
-      <PendingChanges />
+      <PendingChanges alwaysVisible={true} />
     </div>
   );
 }

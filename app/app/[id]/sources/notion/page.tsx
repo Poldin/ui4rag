@@ -69,7 +69,7 @@ export default function NotionSourcePage() {
           </div>
         </div>
       </div>
-      <PendingChanges />
+      <PendingChanges alwaysVisible={true} />
     </div>
   );
 }

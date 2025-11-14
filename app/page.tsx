@@ -1,38 +1,24 @@
 import Link from "next/link";
-import { Database, Zap, Lock, Code2, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { SiSupabase, SiNextdotjs, SiOpenai } from "react-icons/si";
-import AppDemo from "./components/AppDemo";
+import Header from "./components/Header";
+import Footer from "./components/Footer";
+import AgentRagDiagram from "./components/AgentRagDiagram";
+import SourcesShowcase from "./components/SourcesShowcase";
+import SearchCarousel from "./components/SearchCarousel";
+import TrainingDemo from "./components/TrainingDemo";
+import RoadmapSection from "./components/RoadmapSection";
 
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-white">
-      {/* Navigation */}
-      <nav className="border-b border-gray-200">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            <div className="flex items-center gap-2">
-              <span className="text-lg font-semibold text-gray-900">UI4RAG</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <Link href="/pricing" className="text-sm text-gray-700 hover:text-gray-900">
-                Pricing
-              </Link>
-              <Link
-                href="/signin"
-                className="px-4 py-2 text-sm font-medium bg-black text-white rounded-md hover:bg-gray-800 transition-colors"
-              >
-                Sign In
-              </Link>
-            </div>
-          </div>
-        </div>
-      </nav>
+      <Header />
 
       {/* Hero Section */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-16">
         <div className="text-center max-w-3xl mx-auto">
           <h1 className="text-5xl sm:text-6xl font-bold tracking-tight text-gray-900 mb-6">
-            Manage your RAG content with ease
+            Create and manage RAGs.<br />Easy and cheap.
           </h1>
           <p className="text-xl text-gray-700 mb-8">
             Connect your vector database, configure AI embeddings, and manage all your content sources in one beautiful interface.
@@ -66,117 +52,76 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* Interactive Demo */}
+      {/* Reliable Searches Section */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <div className="text-center mb-8">
+        <div className="text-center mb-10">
           <h2 className="text-3xl font-bold text-gray-900 mb-3">
-            See it in action
+            Reliable searches for AI Agents.
           </h2>
           <p className="text-gray-700">
-            Click around and explore the interface. This is what you'll be working with.
+            Semantic search that understands context and delivers accurate results across multiple languages.
           </p>
         </div>
-        <AppDemo />
+        <div className="max-w-4xl mx-auto bg-linear-to-br from-gray-50 to-gray-100 rounded-2xl p-8 border border-gray-200 shadow-lg" style={{ minHeight: '500px' }}>
+          <SearchCarousel />
+        </div>
       </div>
 
-      {/* Features Grid */}
-      <div id="features" className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
-        <div className="grid md:grid-cols-2 gap-8">
-          {/* Feature 1 */}
-          <div className="border border-gray-200 rounded-lg p-6 hover:shadow-lg transition-shadow">
-            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
-              <Database className="w-5 h-5 text-blue-600" />
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              Connect Any Vector Database
-            </h3>
+      {/* Training Demo Section */}
+      <div className="bg-gray-50 py-16">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-10">
+            <h2 className="text-3xl font-bold text-gray-900 mb-3">
+              Effortless RAG Training
+            </h2>
             <p className="text-gray-700">
-              Bring your own PostgreSQL with pgvector, Supabase, or any vector database. We provide the schema, you provide the connection.
+              Add content from multiple sources and train your RAG with a single click. Watch the magic happen.
             </p>
           </div>
-
-          {/* Feature 2 */}
-          <div className="border border-gray-200 rounded-lg p-6 hover:shadow-lg transition-shadow">
-            <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
-              <Zap className="w-5 h-5 text-purple-600" />
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              AI-Powered Embeddings
-            </h3>
-            <p className="text-gray-700">
-              Configure OpenAI embeddings with your API key. Choose models and dimensions that fit your needs.
-            </p>
-          </div>
-
-          {/* Feature 3 */}
-          <div className="border border-gray-200 rounded-lg p-6 hover:shadow-lg transition-shadow">
-            <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center mb-4">
-              <Code2 className="w-5 h-5 text-green-600" />
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              Multiple Content Sources
-            </h3>
-            <p className="text-gray-700">
-              Add content from text, websites, documents, Q&A pairs, or Notion. All in one unified interface.
-            </p>
-          </div>
-
-          {/* Feature 4 */}
-          <div className="border border-gray-200 rounded-lg p-6 hover:shadow-lg transition-shadow">
-            <div className="w-10 h-10 bg-orange-100 rounded-lg flex items-center justify-center mb-4">
-              <Lock className="w-5 h-5 text-orange-600" />
-            </div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
-              Secure & Private
-            </h3>
-            <p className="text-gray-700">
-              Your data stays in your database. We only provide the UI layer. No data storage on our end.
-            </p>
+          <div className="max-w-2xl mx-auto">
+            <TrainingDemo />
           </div>
         </div>
       </div>
 
-      {/* How It Works */}
+      {/* Sources Demo */}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <div className="text-center mb-12">
+          <h2 className="text-3xl font-bold text-gray-900 mb-3">
+            Load data from anywhere. Effortlessly.
+          </h2>
+          <p className="text-xl text-gray-700 max-w-3xl mx-auto">
+            Import content from websites, documents, or create Q&A pairs with AI assistance. 
+            Your RAG is ready in minutes, not hours.
+          </p>
+        </div>
+        <SourcesShowcase />
+      </div>
+
+      {/* Roadmap Section */}
+      <div className="bg-linear-to-b from-gray-50 to-white py-20">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <RoadmapSection />
+        </div>
+      </div>
+
+      {/* Agent RAG Section */}
       <div className="bg-gray-50 py-16">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-3xl font-bold text-center text-gray-900 mb-12">
-            How It Works
-          </h2>
-          <div className="grid md:grid-cols-3 gap-8">
-            <div className="text-center">
-              <div className="w-12 h-12 bg-black text-white rounded-full flex items-center justify-center mx-auto mb-4 text-lg font-bold">
-                1
-              </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                Configure
-              </h3>
-              <p className="text-gray-700">
-                Connect your vector database and AI embeddings API
-              </p>
+          <div className="text-center max-w-3xl mx-auto mb-12">
+            <div className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-full text-sm font-semibold mb-6">
+              <span>Built for AI Agents</span>
             </div>
-            <div className="text-center">
-              <div className="w-12 h-12 bg-black text-white rounded-full flex items-center justify-center mx-auto mb-4 text-lg font-bold">
-                2
-              </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                Add Content
-              </h3>
-              <p className="text-gray-700">
-                Import from multiple sources: text, websites, docs, or Notion
-              </p>
-            </div>
-            <div className="text-center">
-              <div className="w-12 h-12 bg-black text-white rounded-full flex items-center justify-center mx-auto mb-4 text-lg font-bold">
-                3
-              </div>
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                Start Using
-              </h3>
-              <p className="text-gray-700">
-                Your RAG is ready. Query it from your application
-              </p>
-            </div>
+            <h2 className="text-4xl sm:text-5xl font-bold tracking-tight text-gray-900 mb-6">
+              Reliable semantic search<br />for your AI agents.
+            </h2>
+            <p className="text-xl text-gray-700 mb-4">
+              Build RAG tools in minutes. Connect via <span className="font-mono font-semibold text-gray-900">MCP</span> or <span className="font-mono font-semibold text-gray-900">API</span>.
+              <br />Your agents get fast, accurate answers from your knowledge base.
+            </p>
           </div>
+
+          <AgentRagDiagram />
         </div>
       </div>
 
@@ -199,12 +144,7 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* Footer */}
-      <footer className="border-t border-gray-200 py-12">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 text-center text-sm text-gray-600">
-          <p>© {new Date().getFullYear()} UI4RAG. Built for RAG enthusiasts.</p>
-        </div>
-      </footer>
+      <Footer />
     </div>
   );
 }

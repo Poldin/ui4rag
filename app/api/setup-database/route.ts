@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Client } from 'pg';
+import { generateDatabaseSchema, DEFAULT_SOURCES_TABLE, DEFAULT_CHUNKS_TABLE } from '../../../lib/ai-sdk/database-schema';
 
 // Funzione per fare URL-encoding della password nel connection string
 function encodeConnectionString(connStr: string): string {
@@ -20,11 +21,22 @@ function encodeConnectionString(connStr: string): string {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    let { connectionString, tableName, embeddingDimensions } = body;
+    let { connectionString, sourcesTableName, chunksTableName, embeddingDimensions } = body;
 
-    if (!connectionString || !tableName || !embeddingDimensions) {
+    console.log('🔧 Setup Database API received:', {
+      sourcesTableName,
+      chunksTableName,
+      embeddingDimensions,
+      hasConnectionString: !!connectionString,
+    });
+
+    // Usa defaults se non specificato
+    sourcesTableName = sourcesTableName || DEFAULT_SOURCES_TABLE;
+    chunksTableName = chunksTableName || DEFAULT_CHUNKS_TABLE;
+
+    if (!connectionString || !embeddingDimensions) {
       return NextResponse.json(
-        { error: 'Missing required parameters' },
+        { error: 'Missing required parameters (connectionString, embeddingDimensions)' },
         { status: 400 }
       );
     }
@@ -44,51 +56,38 @@ export async function POST(request: NextRequest) {
       // Connetti al database
       await client.connect();
 
-      // SQL script da eseguire
-      const sqlScript = `
--- Enable pgvector extension (required for vector type)
-CREATE EXTENSION IF NOT EXISTS vector;
+      console.log('📋 Creating tables:', {
+        sources: sourcesTableName,
+        chunks: chunksTableName,
+        embeddingDimensions,
+      });
 
--- Create the documents table
-CREATE TABLE IF NOT EXISTS public.${tableName} (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  content TEXT NOT NULL,
-  embedding vector(${embeddingDimensions}),
-  title TEXT,
-  metadata JSONB,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
+      // Genera e esegui lo schema SQL con 2 tabelle
+      const sqlScript = generateDatabaseSchema(
+        sourcesTableName,
+        chunksTableName,
+        embeddingDimensions
+      );
 
--- Create vector similarity search index
-CREATE INDEX IF NOT EXISTS ${tableName}_embedding_idx 
-  ON public.${tableName} 
-  USING ivfflat (embedding vector_cosine_ops)
-  WITH (lists = 100);
-
--- Create updated_at trigger function
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = NOW();
-  RETURN NEW;
-END;
-$$ language 'plpgsql';
-
--- Create trigger
-DROP TRIGGER IF EXISTS update_${tableName}_updated_at ON public.${tableName};
-CREATE TRIGGER update_${tableName}_updated_at 
-  BEFORE UPDATE ON public.${tableName} 
-  FOR EACH ROW 
-  EXECUTE FUNCTION update_updated_at_column();
-      `.trim();
+      console.log('📜 SQL Script generated (first 500 chars):');
+      console.log(sqlScript.substring(0, 500));
+      console.log('...');
+      console.log('🔍 Checking embedding line:', sqlScript.match(/embedding.*vector.*\d+/gi));
 
       // Esegui lo script SQL
       await client.query(sqlScript);
 
+      console.log('✅ Database setup completed successfully');
+      console.log('   - Sources table:', sourcesTableName);
+      console.log('   - Chunks table:', chunksTableName);
+
       return NextResponse.json({
         success: true,
-        message: 'Database setup completed successfully',
+        message: 'Database setup completed successfully with 2 tables',
+        tables: {
+          sources: sourcesTableName,
+          chunks: chunksTableName,
+        },
       });
     } finally {
       // Chiudi sempre la connessione
@@ -105,4 +104,3 @@ CREATE TRIGGER update_${tableName}_updated_at
     );
   }
 }
-

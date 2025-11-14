@@ -110,7 +110,7 @@ export default function SignUpPage() {
                   Create your account
                 </h1>
                 <p className="text-sm text-gray-600 mb-6">
-                  Get started with UI4RAG for free
+                  Get started with Gimme_RAG for free
                 </p>
 
                 <form onSubmit={handleSignUp} className="space-y-4">

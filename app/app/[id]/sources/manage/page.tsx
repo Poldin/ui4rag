@@ -8,6 +8,7 @@ import PendingChanges from "../../../../components/PendingChanges";
 interface TrainedResource {
   id: string;
   content: string;
+  title?: string;
   metadata: any;
   created_at: string;
 }
@@ -17,6 +18,16 @@ interface ConnectionStatus {
   error?: string;
   tableName?: string;
   configMissing?: boolean;
+  stats?: {
+    totalSources: number;
+    totalChunks: number;
+    chunksWithEmbeddings: number;
+    sourcesByType?: Record<string, number>;
+  };
+  tables?: {
+    sources: string;
+    chunks: string;
+  };
 }
 
 export default function ManageSourcesPage() {
@@ -65,7 +76,9 @@ export default function ManageSourcesPage() {
       setResources(data.resources || []);
       setConnectionStatus({
         connected: true,
-        tableName: data.tableName
+        tableName: data.tables?.sources || data.tableName,
+        stats: data.stats,
+        tables: data.tables,
       });
     } catch (error: any) {
       console.error('Error loading resources:', error);
@@ -151,19 +164,21 @@ export default function ManageSourcesPage() {
     });
   };
 
-  const getSourceBadge = (source: string) => {
-    switch (source) {
+  const getSourceBadge = (sourceType: string) => {
+    switch (sourceType) {
       case 'text':
         return { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Text' };
       case 'document':
       case 'docs':
-        return { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Document' };
+        return { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Document' };
       case 'website':
-        return { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Website' };
+        return { bg: 'bg-green-100', text: 'text-green-700', label: 'Website' };
       case 'qa':
-        return { bg: 'bg-gray-100', text: 'text-gray-700', label: 'Q&A' };
+        return { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Q&A' };
+      case 'notion':
+        return { bg: 'bg-orange-100', text: 'text-orange-700', label: 'Notion' };
       default:
-        return { bg: 'bg-gray-100', text: 'text-gray-700', label: source || 'Unknown' };
+        return { bg: 'bg-gray-100', text: 'text-gray-700', label: sourceType || 'Unknown' };
     }
   };
 
@@ -204,10 +219,18 @@ export default function ManageSourcesPage() {
                 ) : connectionStatus.connected ? (
                   <>
                     <p className="text-sm font-medium text-gray-900">
-                      Connected to table: <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs font-mono">{connectionStatus.tableName}</code>
+                      {connectionStatus.tables ? (
+                        <>Connected to: <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs font-mono">{connectionStatus.tables.sources}</code> + <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs font-mono">{connectionStatus.tables.chunks}</code></>
+                      ) : (
+                        <>Connected to table: <code className="bg-gray-100 px-1.5 py-0.5 rounded text-xs font-mono">{connectionStatus.tableName}</code></>
+                      )}
                     </p>
                     <p className="text-xs text-gray-600 mt-0.5">
-                      {resources.length} resource{resources.length !== 1 ? 's' : ''} found
+                      {connectionStatus.stats ? (
+                        <>{connectionStatus.stats.totalSources} sources, {connectionStatus.stats.totalChunks} chunks ({connectionStatus.stats.chunksWithEmbeddings} embedded)</>
+                      ) : (
+                        <>{resources.length} resource{resources.length !== 1 ? 's' : ''} found</>
+                      )}
                     </p>
                   </>
                 ) : (
@@ -317,13 +340,15 @@ export default function ManageSourcesPage() {
                         <div className="flex items-start justify-between gap-2 mb-2">
                           <div>
                             <h3 className="text-sm font-medium text-gray-900">
-                              {resource.metadata?.title || resource.metadata?.url || 'Untitled'}
+                              {resource.title || resource.metadata?.source_title || resource.metadata?.url || 'Untitled'}
                             </h3>
                             <div className="flex items-center gap-2 mt-1">
                               {(() => {
-                                const badge = getSourceBadge(resource.metadata?.source);
+                                // Prova prima source_type (dalla nuova struttura), poi source (legacy)
+                                const sourceType = resource.metadata?.source_type || resource.metadata?.source || 'unknown';
+                                const badge = getSourceBadge(sourceType);
                                 return (
-                                  <span className={`text-xs px-2 py-0.5 rounded ${badge.bg} ${badge.text}`}>
+                                  <span className={`text-xs px-2 py-0.5 rounded border ${badge.bg} ${badge.text}`}>
                                     {badge.label}
                                   </span>
                                 );
@@ -334,6 +359,11 @@ export default function ManageSourcesPage() {
                               {resource.metadata?.wordCount && (
                                 <span className="text-xs text-gray-500">
                                   {resource.metadata.wordCount.toLocaleString()} words
+                                </span>
+                              )}
+                              {resource.metadata?.chunkCount !== undefined && (
+                                <span className="text-xs text-gray-500">
+                                  {resource.metadata.chunkCount.toLocaleString()} chunks
                                 </span>
                               )}
                             </div>

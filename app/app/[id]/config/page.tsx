@@ -11,7 +11,8 @@ export default function ConfigPage() {
   const ragId = params.id as string;
 
   const [dbType, setDbType] = useState<"postgresql">("postgresql");
-  const [tableName, setTableName] = useState("ui4rag_documents");
+  const [sourcesTableName, setSourcesTableName] = useState("gimme_rag_sources");
+  const [chunksTableName, setChunksTableName] = useState("gimme_rag_chunks");
   const [connectionString, setConnectionString] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [embeddingModel, setEmbeddingModel] = useState("text-embedding-3-small");
@@ -22,6 +23,9 @@ export default function ConfigPage() {
   const [setupInProgress, setSetupInProgress] = useState(false);
   const [setupStatus, setSetupStatus] = useState<"idle" | "success" | "error">("idle");
   const [setupMessage, setSetupMessage] = useState("");
+  const [tablesVerified, setTablesVerified] = useState(false);
+  const [verifyingTables, setVerifyingTables] = useState(false);
+  const [verifyMessage, setVerifyMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [connectionError, setConnectionError] = useState("");
@@ -40,12 +44,15 @@ export default function ConfigPage() {
 
         if (data?.config) {
           const config = data.config as any;
+          console.log('📋 Loaded config from DB:', config);
           setDbType(config.vectorDb || "postgresql");
-          setTableName(config.tableName || "ui4rag_documents");
+          setSourcesTableName(config.sourcesTableName || "gimme_rag_sources");
+          setChunksTableName(config.chunksTableName || "gimme_rag_chunks");
           setConnectionString(config.connectionString || "");
           setApiKey(config.apiKey || "");
           setEmbeddingModel(config.embeddingModel || "text-embedding-3-small");
           setEmbeddingDimensions(config.embeddingDimensions || 1536);
+          console.log('📐 Embedding dimensions loaded:', config.embeddingDimensions || 1536);
         }
       } catch (error) {
         console.error("Error loading config:", error);
@@ -58,31 +65,34 @@ export default function ConfigPage() {
   }, [ragId]);
 
   // Funzione per salvare la configurazione nel database
-  const saveConfig = async (updates: any) => {
+  // Salva SEMPRE tutto lo stato corrente per evitare perdite
+  const saveConfig = async (updates: any = {}) => {
     setSaving(true);
     try {
-      // Ottieni la config corrente
-      const { data: currentData } = await supabase
-        .from("rags")
-        .select("config")
-        .eq("id", ragId)
-        .single();
-
-      const currentConfig = (currentData?.config as any) || {};
-
-      // Merge con gli updates
-      const newConfig = {
-        ...currentConfig,
+      // Costruisci la config completa con tutto lo stato corrente
+      const fullConfig = {
+        vectorDb: dbType,
+        connectionString,
+        sourcesTableName,
+        chunksTableName,
+        apiKey,
+        embeddingModel,
+        embeddingDimensions,
+        tableSchemaSQL: sqlCode, // Schema SQL completo come reference
+        configLastUpdated: new Date().toISOString(),
+        // Sovrascrivi con eventuali updates specifici
         ...updates,
       };
 
       // Salva nel database
       const { error } = await supabase
         .from("rags")
-        .update({ config: newConfig, updated_at: new Date().toISOString() })
+        .update({ config: fullConfig, updated_at: new Date().toISOString() })
         .eq("id", ragId);
 
       if (error) throw error;
+      
+      console.log('💾 Full config saved (including SQL schema):', fullConfig);
     } catch (error) {
       console.error("Error saving config:", error);
     } finally {
@@ -123,24 +133,49 @@ export default function ConfigPage() {
   const sqlCode = `-- Enable pgvector extension (required for vector type)
 CREATE EXTENSION IF NOT EXISTS vector;
 
--- Create the documents table
-CREATE TABLE IF NOT EXISTS public.${tableName} (
+-- ============================================
+-- TABLE 1: SOURCES (documenti originali)
+-- ============================================
+CREATE TABLE IF NOT EXISTS public.${sourcesTableName} (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  title TEXT NOT NULL,
   content TEXT NOT NULL,
-  embedding vector(${embeddingDimensions}),
-  title TEXT,
-  metadata JSONB,
+  source_type TEXT NOT NULL,
+  metadata JSONB DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Create vector similarity search index
-CREATE INDEX IF NOT EXISTS ${tableName}_embedding_idx 
-  ON public.${tableName} 
+CREATE INDEX IF NOT EXISTS ${sourcesTableName}_source_type_idx 
+  ON public.${sourcesTableName}(source_type);
+
+CREATE INDEX IF NOT EXISTS ${sourcesTableName}_created_at_idx 
+  ON public.${sourcesTableName}(created_at DESC);
+
+-- ============================================
+-- TABLE 2: CHUNKS (chunks embedded)
+-- ============================================
+CREATE TABLE IF NOT EXISTS public.${chunksTableName} (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  source_id UUID NOT NULL REFERENCES public.${sourcesTableName}(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  embedding vector(${embeddingDimensions}),
+  chunk_index INTEGER NOT NULL,
+  chunk_total INTEGER NOT NULL,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS ${chunksTableName}_source_id_idx 
+  ON public.${chunksTableName}(source_id);
+
+-- Vector similarity search index
+CREATE INDEX IF NOT EXISTS ${chunksTableName}_embedding_idx 
+  ON public.${chunksTableName} 
   USING ivfflat (embedding vector_cosine_ops)
   WITH (lists = 100);
 
--- Create updated_at trigger function
+-- Trigger for updated_at on SOURCES table
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -149,9 +184,9 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Create trigger
-CREATE TRIGGER update_${tableName}_updated_at 
-  BEFORE UPDATE ON public.${tableName} 
+DROP TRIGGER IF EXISTS update_${sourcesTableName}_updated_at ON public.${sourcesTableName};
+CREATE TRIGGER update_${sourcesTableName}_updated_at 
+  BEFORE UPDATE ON public.${sourcesTableName} 
   FOR EACH ROW 
   EXECUTE FUNCTION update_updated_at_column();`;
 
@@ -207,7 +242,9 @@ CREATE TRIGGER update_${tableName}_updated_at
   };
 
   const handleAutoSetup = async () => {
-    if (!connectionString || !tableName) return;
+    if (!connectionString || !sourcesTableName || !chunksTableName) return;
+    
+    console.log('🚀 Creating tables with dimensions:', embeddingDimensions);
     
     setSetupInProgress(true);
     setSetupStatus("idle");
@@ -221,7 +258,8 @@ CREATE TRIGGER update_${tableName}_updated_at
         },
         body: JSON.stringify({
           connectionString,
-          tableName,
+          sourcesTableName,
+          chunksTableName,
           embeddingDimensions,
         }),
       });
@@ -230,14 +268,22 @@ CREATE TRIGGER update_${tableName}_updated_at
 
       if (response.ok) {
         setSetupStatus("success");
-        setSetupMessage("Database table created successfully!");
+        setSetupMessage("Database tables created successfully!");
+        setTablesVerified(true);
+        
+        // Salva nella config che le tabelle sono state create
+        await saveConfig({
+          tablesCreatedAt: new Date().toISOString(),
+          tablesVerified: true,
+        });
+        
         setTimeout(() => {
           setSetupStatus("idle");
           setSetupMessage("");
         }, 5000);
       } else {
         setSetupStatus("error");
-        const errorMsg = data.details || data.error || "Failed to create table";
+        const errorMsg = data.details || data.error || "Failed to create tables";
         // Messaggio più chiaro per errori DNS
         if (errorMsg.includes("ENOTFOUND")) {
           setSetupMessage("Cannot connect to database. Please verify your connection string is correct.");
@@ -262,6 +308,52 @@ CREATE TRIGGER update_${tableName}_updated_at
       }, 10000);
     } finally {
       setSetupInProgress(false);
+    }
+  };
+
+  const handleVerifyTables = async () => {
+    if (!connectionString || !sourcesTableName || !chunksTableName) return;
+    
+    console.log('🔍 Verifying tables with expected dimensions:', embeddingDimensions);
+    
+    setVerifyingTables(true);
+    setVerifyMessage("");
+    
+    try {
+      const response = await fetch('/api/verify-tables', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          connectionString,
+          sourcesTableName,
+          chunksTableName,
+          embeddingDimensions,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setTablesVerified(true);
+        setVerifyMessage(`All set! ${data.sourcesTable.records} sources, ${data.chunksTable.records} chunks`);
+      } else {
+        setTablesVerified(false);
+        setVerifyMessage(data.message || 'Tables not found or misconfigured');
+      }
+
+      setTimeout(() => {
+        setVerifyMessage("");
+      }, 5000);
+    } catch (error: any) {
+      setTablesVerified(false);
+      setVerifyMessage("Failed to verify tables");
+      setTimeout(() => {
+        setVerifyMessage("");
+      }, 5000);
+    } finally {
+      setVerifyingTables(false);
     }
   };
 
@@ -339,10 +431,11 @@ CREATE TRIGGER update_${tableName}_updated_at
                   type="password"
                   placeholder="sk-..."
                   value={apiKey}
-                  onChange={(e) => {
-                    setApiKey(e.target.value);
-                    saveConfig({ apiKey: e.target.value });
-                  }}
+                        onChange={(e) => {
+                          const newApiKey = e.target.value;
+                          setApiKey(newApiKey);
+                          saveConfig({ apiKey: newApiKey });
+                        }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
                 />
               </div>
@@ -357,7 +450,7 @@ CREATE TRIGGER update_${tableName}_updated_at
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
                   >
                     <option value="text-embedding-3-small">text-embedding-3-small (recommended)</option>
-                    <option value="text-embedding-3-large">text-embedding-3-large</option>
+                    <option value="text-embedding-3-large">text-embedding-3-large (best)</option>
                     <option value="text-embedding-ada-002">text-embedding-ada-002 (legacy)</option>
                   </select>
                 </div>
@@ -411,7 +504,11 @@ CREATE TRIGGER update_${tableName}_updated_at
                 <div className="flex items-center gap-2">
                 <select 
                   value={dbType}
-                  onChange={(e) => setDbType(e.target.value as "postgresql")}
+                  onChange={(e) => {
+                    const newDbType = e.target.value as "postgresql";
+                    setDbType(newDbType);
+                    saveConfig({ vectorDb: newDbType });
+                  }}
                   className="w-fit px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
                 >
                     <option value="postgresql">PostgreSQL-compatible</option>
@@ -475,63 +572,107 @@ CREATE TRIGGER update_${tableName}_updated_at
                     )}
                   </div>
 
-                  <div>
-                    <label className="block text-sm text-gray-700 mb-1.5">
-                      Table Name
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="ui4rag_documents"
-                      value={tableName}
-                      onChange={(e) => {
-                        setTableName(e.target.value);
-                        saveConfig({ tableName: e.target.value });
-                      }}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
-                    />
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm text-gray-700 mb-1.5">
+                        Sources Table Name
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="gimme_rag_sources"
+                        value={sourcesTableName}
+                        onChange={(e) => {
+                          setSourcesTableName(e.target.value);
+                          saveConfig({ sourcesTableName: e.target.value });
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-700 mb-1.5">
+                        Chunks Table Name
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="gimme_rag_chunks"
+                        value={chunksTableName}
+                        onChange={(e) => {
+                          setChunksTableName(e.target.value);
+                          saveConfig({ chunksTableName: e.target.value });
+                        }}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+                      />
+                    </div>
                   </div>
 
-                  {/* Auto Setup Button - Temporarily hidden */}
-                  {/* <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                  {/* Auto Setup Button */}
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex-1">
                         <h3 className="text-sm font-medium text-gray-900 mb-1">🚀 Automatic Setup</h3>
                         <p className="text-xs text-gray-600">
-                          Click the button to automatically create the table in your database. We'll connect using your connection string and run the setup script.
+                          {tablesVerified 
+                            ? "Tables are configured. You can verify them again if needed."
+                            : "Click the button to automatically create the 2 tables (sources + chunks) in your database."}
                         </p>
                       </div>
                     </div>
-                    <div className="flex flex-col gap-3 mt-3">
+                    <div className="flex items-center gap-3 mt-3">
+                      {tablesVerified ? (
+                        <div className="flex items-center gap-2 px-4 py-2 bg-gray-100 border border-gray-300 rounded-md">
+                          <CheckCircle2 className="w-4 h-4 text-gray-900" />
+                          <span className="text-sm font-medium text-gray-900">Tables Configured</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={handleAutoSetup}
+                          disabled={setupInProgress || !connectionString || !sourcesTableName || !chunksTableName}
+                          className="flex items-center justify-center gap-2 w-fit px-4 py-2 bg-gray-900 text-white text-sm rounded-md hover:bg-gray-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed font-medium"
+                        >
+                          {setupInProgress && <Loader2 className="w-4 h-4 animate-spin" />}
+                          {setupInProgress ? "creating tables..." : "create tables automatically"}
+                        </button>
+                      )}
+                      
                       <button
-                        onClick={handleAutoSetup}
-                        disabled={setupInProgress || !connectionString || !tableName}
-                        className="flex items-center justify-center gap-2 w-fit px-4 py-2 bg-gray-900 text-white text-sm rounded-md hover:bg-gray-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed font-medium"
+                        onClick={handleVerifyTables}
+                        disabled={verifyingTables || !connectionString || !sourcesTableName || !chunksTableName}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-900 text-sm rounded-md hover:bg-gray-50 transition-colors disabled:bg-gray-100 disabled:cursor-not-allowed font-medium"
                       >
-                        {setupInProgress && <Loader2 className="w-4 h-4 animate-spin" />}
-                        {setupInProgress ? "creating table..." : "create table automatically"}
+                        {verifyingTables && <Loader2 className="w-4 h-4 animate-spin" />}
+                        {verifyingTables ? "verifying..." : "verify tables"}
                       </button>
+                    </div>
+                    
+                    {/* Messages */}
+                    <div className="mt-3 space-y-2">
                       {setupStatus === "success" && (
-                        <div className="flex items-center gap-1.5 text-gray-900 bg-gray-100 border border-gray-300 rounded-md px-3 py-2">
-                          <CheckCircle2 className="w-4 h-4" />
+                        <div className="flex items-center gap-1.5 text-gray-900 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+                          <CheckCircle2 className="w-4 h-4 text-green-600" />
                           <span className="text-xs font-medium">{setupMessage}</span>
                         </div>
                       )}
                       {setupStatus === "error" && (
-                        <div className="flex items-center gap-1.5 text-gray-900 bg-gray-100 border border-gray-300 rounded-md px-3 py-2">
-                          <AlertCircle className="w-4 h-4" />
+                        <div className="flex items-center gap-1.5 text-gray-900 bg-red-50 border border-red-200 rounded-md px-3 py-2">
+                          <AlertCircle className="w-4 h-4 text-red-600" />
                           <span className="text-xs font-medium">{setupMessage}</span>
                         </div>
                       )}
+                      {verifyMessage && (
+                        <div className="flex items-center gap-1.5 text-gray-900 bg-blue-50 border border-blue-200 rounded-md px-3 py-2">
+                          <span className="text-xs font-medium">{verifyMessage}</span>
+                        </div>
+                      )}
                     </div>
-                  </div> */}
+                  </div>
 
                   {/* Table Schema */}
                   <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
                     <div className="flex items-start justify-between mb-2">
                       <div>
-                        <h3 className="text-sm font-medium text-gray-900">Required Table Schema</h3>
+                        <h3 className="text-sm font-medium text-gray-900">Required Tables Schema</h3>
                         <p className="text-xs text-gray-600 mt-1">
-                          Run this SQL in your database to create the required table:
+                          Run this SQL in your database to create the 2 required tables (sources + chunks):
                         </p>
                       </div>
                       <button
