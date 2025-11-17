@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Loader2, AlertCircle, Trash2, RefreshCw, Check } from "lucide-react";
+import { Loader2, AlertCircle, Trash2, RefreshCw, Check, FileText, X } from "lucide-react";
 import PendingChanges from "../../../../components/PendingChanges";
 
 interface TrainedResource {
@@ -11,6 +11,31 @@ interface TrainedResource {
   title?: string;
   metadata: any;
   created_at: string;
+}
+
+interface Chunk {
+  id: string;
+  content: string;
+  chunkIndex: number;
+  chunkTotal: number;
+  metadata: any;
+  createdAt: string;
+}
+
+interface SourceWithChunks {
+  source: {
+    id: string;
+    title: string;
+    content: string;
+    sourceType: string;
+    metadata: any;
+    createdAt: string;
+  };
+  chunks: Chunk[];
+  stats: {
+    totalChunks: number;
+    sourceLength: number;
+  };
 }
 
 interface ConnectionStatus {
@@ -40,6 +65,18 @@ export default function ManageSourcesPage() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({ connected: false });
   const [selectedResources, setSelectedResources] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  
+  // Sidebar per vedere i chunks
+  const [selectedSource, setSelectedSource] = useState<SourceWithChunks | null>(null);
+  const [loadingChunks, setLoadingChunks] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = sessionStorage.getItem('manage-sidebar-width');
+      return saved ? parseInt(saved) : 600;
+    }
+    return 600;
+  });
+  const [isResizing, setIsResizing] = useState(false);
 
   // Carica le risorse dal database configurato
   useEffect(() => {
@@ -114,6 +151,62 @@ export default function ManageSourcesPage() {
     setSelectedResources(new Set());
   };
 
+  // Carica i chunks di un source
+  const handleViewChunks = async (sourceId: string, e: React.MouseEvent) => {
+    e.stopPropagation(); // Evita il toggle della selezione
+    setLoadingChunks(true);
+    setSelectedSource(null);
+
+    try {
+      const response = await fetch(`/api/get-source-chunks?ragId=${ragId}&sourceId=${sourceId}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to load chunks');
+      }
+
+      setSelectedSource(data);
+    } catch (error: any) {
+      console.error('Error loading chunks:', error);
+      alert('Failed to load chunks: ' + error.message);
+    } finally {
+      setLoadingChunks(false);
+    }
+  };
+
+  // Resize handlers per la sidebar
+  const startResizing = () => {
+    setIsResizing(true);
+  };
+
+  const stopResizing = () => {
+    setIsResizing(false);
+  };
+
+  const resize = (e: MouseEvent) => {
+    if (isResizing) {
+      const newWidth = window.innerWidth - e.clientX;
+      if (newWidth >= 400 && newWidth <= 1200) {
+        setSidebarWidth(newWidth);
+        sessionStorage.setItem('manage-sidebar-width', newWidth.toString());
+      }
+    }
+  };
+
+  // Effect per gestire il resize
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => resize(e);
+    const handleMouseUp = () => stopResizing();
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, sidebarWidth]);
+
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const handleDelete = async () => {
@@ -183,17 +276,22 @@ export default function ManageSourcesPage() {
   };
 
   return (
-    <div className="h-full flex flex-col relative">
-      {/* Header */}
-      <div className="border-b border-gray-200 px-6 py-4">
-        <h1 className="text-xl font-semibold text-gray-900">Manage Trained Resources</h1>
-        <p className="text-sm text-gray-600 mt-1">
-          View and manage all resources currently trained in your RAG system
-        </p>
-      </div>
+    <div className="h-full flex">
+      {/* Main Content */}
+      <div 
+        className="flex-1 flex flex-col overflow-hidden transition-all duration-300"
+        style={{ marginRight: selectedSource ? `${sidebarWidth}px` : 0 }}
+      >
+        {/* Header */}
+        <div className="border-b border-gray-200 px-6 py-4">
+          <h1 className="text-xl font-semibold text-gray-900">Manage Trained Resources</h1>
+          <p className="text-sm text-gray-600 mt-1">
+            View and manage all resources currently trained in your RAG system
+          </p>
+        </div>
 
-      {/* Content */}
-      <div className="flex-1 px-6 py-6 overflow-y-auto">
+        {/* Content */}
+        <div className="flex-1 px-6 py-6 overflow-y-auto">
         <div className="max-w-6xl space-y-6">
           {/* Connection Status */}
           <div className={`p-4 rounded-lg border ${
@@ -338,7 +436,7 @@ export default function ManageSourcesPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2 mb-2">
-                          <div>
+                          <div className="flex-1">
                             <h3 className="text-sm font-medium text-gray-900">
                               {resource.title || resource.metadata?.source_title || resource.metadata?.url || 'Untitled'}
                             </h3>
@@ -368,6 +466,13 @@ export default function ManageSourcesPage() {
                               )}
                             </div>
                           </div>
+                          <button
+                            onClick={(e) => handleViewChunks(resource.id, e)}
+                            className="px-3 py-1.5 text-xs text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center gap-1.5 flex-shrink-0"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            View Chunks
+                          </button>
                         </div>
                         <p className="text-xs text-gray-600 line-clamp-2">
                           {resource.content}
@@ -395,7 +500,110 @@ export default function ManageSourcesPage() {
             </div>
           )}
         </div>
+        </div>
+
+        <PendingChanges />
       </div>
+
+      {/* Sidebar per vedere i chunks */}
+      {selectedSource && (
+        <div 
+          className="fixed right-0 top-0 h-full bg-white border-l border-gray-200 shadow-xl flex flex-col z-50"
+          style={{ width: `${sidebarWidth}px` }}
+        >
+          {/* Resize handle */}
+          <div
+            className="absolute left-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500 transition-colors"
+            onMouseDown={startResizing}
+          />
+
+          {/* Sidebar Header */}
+          <div className="flex items-center justify-between p-4 border-b border-gray-200 bg-gray-50">
+            <div className="flex items-center gap-2">
+              <FileText className="w-5 h-5 text-gray-700" />
+              <h2 className="text-base font-semibold text-gray-900">Chunks Breakdown</h2>
+            </div>
+            <button
+              onClick={() => setSelectedSource(null)}
+              className="p-1.5 hover:bg-gray-200 rounded-md transition-colors"
+            >
+              <X className="w-5 h-5 text-gray-600" />
+            </button>
+          </div>
+
+          {/* Source Info */}
+          <div className="p-4 border-b border-gray-200 bg-gray-50">
+            <h3 className="text-sm font-medium text-gray-900 mb-1">
+              {selectedSource.source.title}
+            </h3>
+            <div className="flex items-center gap-2 text-xs text-gray-600">
+              <span>{selectedSource.stats.totalChunks} chunks</span>
+              <span>•</span>
+              <span>{selectedSource.stats.sourceLength.toLocaleString()} chars</span>
+              <span>•</span>
+              <span className="capitalize">{selectedSource.source.sourceType}</span>
+            </div>
+          </div>
+
+          {/* Loading */}
+          {loadingChunks && (
+            <div className="flex-1 flex items-center justify-center">
+              <Loader2 className="w-8 h-8 animate-spin text-gray-400" />
+            </div>
+          )}
+
+          {/* Chunks List */}
+          {!loadingChunks && (
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <p className="text-xs text-gray-500 mb-2">
+                Each chunk is processed independently for embeddings
+              </p>
+              
+              {selectedSource.chunks.map((chunk, idx) => (
+                <div
+                  key={chunk.id}
+                  className="border border-gray-200 rounded-lg p-3 bg-white hover:shadow-sm transition-shadow"
+                >
+                  {/* Chunk Header */}
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-gray-900 bg-gray-100 px-2 py-0.5 rounded">
+                        Chunk {idx + 1} / {selectedSource.chunks.length}
+                      </span>
+                      {chunk.metadata?.word_count && (
+                        <span className="text-xs text-gray-500">
+                          {chunk.metadata.word_count} words
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Chunk Content */}
+                  <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap line-clamp-6">
+                    {chunk.content}
+                  </p>
+
+                  {/* Metadata */}
+                  {chunk.metadata && (
+                    <div className="mt-2 pt-2 border-t border-gray-100 text-xs text-gray-500">
+                      {chunk.metadata.start_char !== undefined && (
+                        <span>Pos: {chunk.metadata.start_char}-{chunk.metadata.end_char}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Powered by LangChain badge */}
+          <div className="p-3 border-t border-gray-200 bg-gray-50">
+            <div className="text-xs text-gray-500 text-center">
+              Powered by <span className="font-semibold text-gray-700">LangChain</span> intelligent chunking
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete Confirmation Dialog */}
       {showDeleteConfirm && (
@@ -444,8 +652,6 @@ export default function ManageSourcesPage() {
           </div>
         </div>
       )}
-
-      <PendingChanges />
     </div>
   );
 }

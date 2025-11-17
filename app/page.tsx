@@ -9,6 +9,20 @@ import SearchCarousel from "./components/SearchCarousel";
 import TrainingDemo from "./components/TrainingDemo";
 import RoadmapSection from "./components/RoadmapSection";
 
+// LangChain Icon Component (parrot + chain logo)
+function LangChainIcon({ className }: { className?: string }) {
+  return (
+    <svg 
+      viewBox="0 0 24 24" 
+      fill="currentColor" 
+      className={className}
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path d="M12 2C10.9 2 10 2.9 10 4V6.17C8.83 6.58 8 7.69 8 9V11.17C6.83 11.58 6 12.69 6 14V16.17C4.83 16.58 4 17.69 4 19C4 20.66 5.34 22 7 22C8.31 22 9.42 21.17 9.83 20H14.17C14.58 21.17 15.69 22 17 22C18.66 22 20 20.66 20 19C20 17.69 19.17 16.58 18 16.17V14C18 12.69 17.17 11.58 16 11.17V9C16 7.69 15.17 6.58 14 6.17V4C14 2.9 13.1 2 12 2ZM12 4C12.55 4 13 4.45 13 5V6C13 6.55 12.55 7 12 7C11.45 7 11 6.55 11 6V5C11 4.45 11.45 4 12 4ZM12 8.5C13.38 8.5 14.5 9.62 14.5 11V13C14.5 14.38 13.38 15.5 12 15.5C10.62 15.5 9.5 14.38 9.5 13V11C9.5 9.62 10.62 8.5 12 8.5ZM7 17.5C7.83 17.5 8.5 18.17 8.5 19C8.5 19.83 7.83 20.5 7 20.5C6.17 20.5 5.5 19.83 5.5 19C5.5 18.17 6.17 17.5 7 17.5ZM17 17.5C17.83 17.5 18.5 18.17 18.5 19C18.5 19.83 17.83 20.5 17 20.5C16.17 20.5 15.5 19.83 15.5 19C15.5 18.17 16.17 17.5 17 17.5Z" />
+    </svg>
+  );
+}
+
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-white">
@@ -37,6 +51,10 @@ export default function LandingPage() {
             <div className="flex items-center gap-2">
               <SiOpenai className="w-5 h-5 text-gray-700" />
               <span className="text-sm text-gray-700">OpenAI</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <LangChainIcon className="w-5 h-5 text-gray-700" />
+              <span className="text-sm text-gray-700">LangChain</span>
             </div>
           </div>
 

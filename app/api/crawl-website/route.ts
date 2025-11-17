@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
+import { Readability } from '@mozilla/readability';
+import { JSDOM } from 'jsdom';
 
 interface CrawlOptions {
   url: string;
@@ -13,8 +15,11 @@ interface PageData {
   url: string;
   title: string;
   description: string;
+  content: string; // ← Contenuto pulito estratto da Readability
+  textContent: string; // ← Testo plain senza HTML
   depth: number;
   wordCount: number;
+  excerpt?: string; // ← Estratto della pagina
 }
 
 // Funzione per normalizzare gli URL
@@ -51,27 +56,65 @@ async function crawlPage(url: string, baseUrl: string, followExternal: boolean):
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; WebCrawler/1.0)',
       },
-      timeout: 10000,
+      timeout: 15000,
       maxRedirects: 5,
     });
 
     const html = response.data;
+    
+    // Usa JSDOM per creare un DOM navigabile per Readability
+    const dom = new JSDOM(html, { url });
+    const document = dom.window.document;
+
+    // Usa Mozilla Readability per estrarre il contenuto principale
+    const reader = new Readability(document);
+    const article = reader.parse();
+
+    // Fallback con cheerio se Readability non riesce
     const $ = cheerio.load(html);
 
-    // Estrae il titolo
-    const title = $('title').text().trim() || $('h1').first().text().trim() || 'No title';
+    let title = 'No title';
+    let content = '';
+    let textContent = '';
+    let excerpt = '';
 
-    // Estrae la descrizione
+    if (article) {
+      // Readability è riuscito a estrarre il contenuto
+      title = article.title || $('title').text().trim() || 'No title';
+      content = article.content || ''; // HTML pulito
+      textContent = article.textContent || ''; // Testo plain
+      excerpt = article.excerpt || '';
+    } else {
+      // Fallback: usa cheerio per estrarre il contenuto
+      title = $('title').text().trim() || $('h1').first().text().trim() || 'No title';
+      
+      // Rimuovi elementi non desiderati
+      $('script, style, nav, footer, aside, header, .ad, .advertisement, .social-share').remove();
+      
+      // Prova a trovare il contenuto principale
+      const mainContent = $('article, main, [role="main"], .content, .post-content, .entry-content').first();
+      if (mainContent.length > 0) {
+        content = mainContent.html() || '';
+        textContent = mainContent.text().replace(/\s+/g, ' ').trim();
+      } else {
+        content = $('body').html() || '';
+        textContent = $('body').text().replace(/\s+/g, ' ').trim();
+      }
+      
+      // Genera un excerpt
+      excerpt = textContent.substring(0, 300) + (textContent.length > 300 ? '...' : '');
+    }
+
+    // Estrae la descrizione (per backward compatibility)
     const description = $('meta[name="description"]').attr('content') || 
                        $('meta[property="og:description"]').attr('content') || 
-                       $('p').first().text().trim().substring(0, 200) || 
+                       excerpt ||
                        'No description';
 
-    // Conta le parole nel contenuto
-    const bodyText = $('body').text().replace(/\s+/g, ' ').trim();
-    const wordCount = bodyText.split(' ').filter(word => word.length > 0).length;
+    // Conta le parole nel contenuto testuale
+    const wordCount = textContent.split(/\s+/).filter(word => word.length > 0).length;
 
-    // Estrae tutti i link
+    // Estrae tutti i link per il crawling
     const links: string[] = [];
     $('a[href]').each((_, element) => {
       const href = $(element).attr('href');
@@ -104,6 +147,9 @@ async function crawlPage(url: string, baseUrl: string, followExternal: boolean):
         url: normalizeUrl(url),
         title,
         description,
+        content, // HTML pulito
+        textContent, // Testo plain
+        excerpt,
         depth: 0, // Verrà impostato dal crawler
         wordCount,
       },
@@ -116,6 +162,8 @@ async function crawlPage(url: string, baseUrl: string, followExternal: boolean):
         url: normalizeUrl(url),
         title: 'Error loading page',
         description: error.message,
+        content: '',
+        textContent: '',
         depth: 0,
         wordCount: 0,
       },
@@ -124,6 +172,7 @@ async function crawlPage(url: string, baseUrl: string, followExternal: boolean):
 }
 
 // Funzione principale di crawling con callback per streaming
+// Ottimizzato con crawling parallelo e concorrenza controllata
 async function crawlWebsite(
   options: CrawlOptions,
   onPageFound?: (page: PageData) => void
@@ -133,41 +182,79 @@ async function crawlWebsite(
   const visited = new Set<string>();
   const queue: { url: string; depth: number }[] = [{ url: normalizeUrl(url), depth: 0 }];
   const results: PageData[] = [];
+  const inProgress = new Set<string>();
+  const maxConcurrency = 3; // Crawl fino a 3 pagine in parallelo
 
-  while (queue.length > 0 && results.length < maxPages) {
-    const current = queue.shift()!;
-    const normalizedUrl = normalizeUrl(current.url);
-
-    // Salta se già visitato o supera la profondità massima
-    if (visited.has(normalizedUrl) || current.depth > maxDepth) {
-      continue;
+  // Funzione per processare una singola pagina
+  const processPage = async (item: { url: string; depth: number }) => {
+    const normalizedUrl = normalizeUrl(item.url);
+    
+    if (visited.has(normalizedUrl) || inProgress.has(normalizedUrl)) {
+      return null;
     }
 
     visited.add(normalizedUrl);
+    inProgress.add(normalizedUrl);
 
-    console.log(`Crawling (depth ${current.depth}): ${normalizedUrl}`);
+    try {
+      console.log(`Crawling (depth ${item.depth}): ${normalizedUrl}`);
+      const { links, pageData } = await crawlPage(normalizedUrl, url, followExternal);
+      pageData.depth = item.depth;
+      
+      results.push(pageData);
 
-    const { links, pageData } = await crawlPage(normalizedUrl, url, followExternal);
-    pageData.depth = current.depth;
-    results.push(pageData);
+      // Notifica la callback se fornita (per streaming)
+      if (onPageFound) {
+        onPageFound(pageData);
+      }
 
-    // Notifica la callback se fornita (per streaming)
-    if (onPageFound) {
-      onPageFound(pageData);
+      // Aggiungi nuovi link alla coda se non abbiamo superato la profondità massima
+      if (item.depth < maxDepth) {
+        for (const link of links) {
+          const normalizedLink = normalizeUrl(link);
+          if (!visited.has(normalizedLink) && !inProgress.has(normalizedLink)) {
+            queue.push({ url: normalizedLink, depth: item.depth + 1 });
+          }
+        }
+      }
+
+      return pageData;
+    } finally {
+      inProgress.delete(normalizedUrl);
     }
+  };
 
-    // Aggiungi nuovi link alla coda se non abbiamo superato la profondità massima
-    if (current.depth < maxDepth) {
-      for (const link of links) {
-        const normalizedLink = normalizeUrl(link);
-        if (!visited.has(normalizedLink)) {
-          queue.push({ url: normalizedLink, depth: current.depth + 1 });
+  // Crawling con concorrenza controllata
+  while ((queue.length > 0 || inProgress.size > 0) && results.length < maxPages) {
+    // Prendi i prossimi item da processare (fino a maxConcurrency)
+    const batch: { url: string; depth: number }[] = [];
+    
+    while (batch.length < maxConcurrency && queue.length > 0 && results.length + inProgress.size < maxPages) {
+      const item = queue.shift();
+      if (item && !visited.has(normalizeUrl(item.url)) && !inProgress.has(normalizeUrl(item.url))) {
+        // Verifica profondità prima di aggiungere al batch
+        if (item.depth <= maxDepth) {
+          batch.push(item);
         }
       }
     }
 
-    // Piccola pausa per non sovraccaricare il server
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Se non ci sono item da processare ma ci sono ancora richieste in corso, aspetta
+    if (batch.length === 0 && inProgress.size > 0) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      continue;
+    }
+
+    // Se non ci sono né item né richieste in corso, esci
+    if (batch.length === 0 && inProgress.size === 0) {
+      break;
+    }
+
+    // Processa il batch in parallelo
+    await Promise.all(batch.map(item => processPage(item)));
+
+    // Piccola pausa per rate limiting
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
 
   return results;

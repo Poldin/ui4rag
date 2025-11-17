@@ -1,13 +1,19 @@
 /**
  * Funzioni per lo splitting intelligente del contenuto in chunks
  * ottimizzati per la generazione di embeddings
+ * 
+ * Powered by LangChain.js - per chunking semantico avanzato
  */
+
+import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
+import { MarkdownTextSplitter } from '@langchain/textsplitters';
 
 export interface ChunkOptions {
   maxChunkSize?: number;        // Dimensione massima in caratteri (default: 1000)
   chunkOverlap?: number;         // Overlap tra chunks (default: 200)
   minChunkSize?: number;         // Dimensione minima in caratteri (default: 100)
   preserveParagraphs?: boolean;  // Mantieni paragrafi intatti se possibile (default: true)
+  sourceType?: 'text' | 'website' | 'docs' | 'qa' | 'notion'; // Tipo di source per chunking adattivo
 }
 
 export interface Chunk {
@@ -21,25 +27,69 @@ export interface Chunk {
 }
 
 /**
- * Split del testo in chunks con overlap intelligente
+ * Crea uno splitter LangChain adattivo in base al tipo di contenuto
  */
-export function chunkText(
-  text: string,
-  options: ChunkOptions = {}
-): Chunk[] {
+function createAdaptiveSplitter(options: ChunkOptions): RecursiveCharacterTextSplitter | MarkdownTextSplitter {
   const {
     maxChunkSize = 1000,
     chunkOverlap = 200,
+    sourceType = 'text',
+  } = options;
+
+  // Per documenti formattati con markdown (docs, website)
+  if (sourceType === 'docs' || sourceType === 'website') {
+    return new MarkdownTextSplitter({
+      chunkSize: maxChunkSize,
+      chunkOverlap: chunkOverlap,
+    });
+  }
+
+  // Per Q&A usiamo overlap maggiore per mantenere contesto
+  if (sourceType === 'qa') {
+    return RecursiveCharacterTextSplitter.fromLanguage('markdown', {
+      chunkSize: maxChunkSize,
+      chunkOverlap: Math.min(chunkOverlap * 1.5, maxChunkSize * 0.3), // 30% di overlap per Q&A
+    });
+  }
+
+  // Default: RecursiveCharacterTextSplitter con separatori intelligenti
+  // Questo splitter usa una gerarchia: \n\n -> \n -> . -> spazio
+  return new RecursiveCharacterTextSplitter({
+    chunkSize: maxChunkSize,
+    chunkOverlap: chunkOverlap,
+    separators: [
+      '\n\n',  // Paragrafi
+      '\n',    // Newline
+      '. ',    // Fine frase
+      '! ',    // Fine frase esclamativa
+      '? ',    // Fine frase interrogativa
+      '; ',    // Punto e virgola
+      ', ',    // Virgola
+      ' ',     // Spazio
+      '',      // Carattere per carattere (fallback)
+    ],
+    keepSeparator: true,
+    lengthFunction: (text: string) => text.length,
+  });
+}
+
+/**
+ * Split del testo in chunks con overlap intelligente usando LangChain
+ * Questa funzione mantiene backward compatibility con l'interfaccia esistente
+ */
+export async function chunkText(
+  text: string,
+  options: ChunkOptions = {}
+): Promise<Chunk[]> {
+  const {
+    maxChunkSize = 1000,
     minChunkSize = 100,
-    preserveParagraphs = true,
   } = options;
 
   if (!text || text.trim().length === 0) {
     return [];
   }
 
-  const chunks: Chunk[] = [];
-  
   // Normalizza il testo
   const normalizedText = text.replace(/\r\n/g, '\n').trim();
   
@@ -56,172 +106,121 @@ export function chunkText(
     }];
   }
 
-  // Split per paragrafi se preserveParagraphs è true
-  const paragraphs = preserveParagraphs 
-    ? normalizedText.split(/\n\n+/)
-    : [normalizedText];
+  // Crea lo splitter appropriato
+  const splitter = createAdaptiveSplitter(options);
 
-  let currentChunk = '';
+  // Usa LangChain per lo splitting intelligente
+  const langchainDocs = await splitter.createDocuments([normalizedText]);
+
+  // Converti i documenti LangChain nel nostro formato Chunk
+  const chunks: Chunk[] = [];
   let currentStartChar = 0;
-  let chunkIndex = 0;
+  let chunkIndex = 0; // Contatore separato per indici sequenziali
 
-  for (let i = 0; i < paragraphs.length; i++) {
-    const paragraph = paragraphs[i].trim();
-    
-    if (!paragraph) continue;
+  for (let i = 0; i < langchainDocs.length; i++) {
+    const doc = langchainDocs[i];
+    const chunkText = doc.pageContent;
+    const chunkLength = chunkText.length;
 
-    // Se il paragrafo da solo supera maxChunkSize, lo splittiamo
-    if (paragraph.length > maxChunkSize) {
-      // Salva il chunk corrente se non vuoto
-      if (currentChunk.trim()) {
-        chunks.push(createChunk(currentChunk.trim(), chunkIndex++, currentStartChar));
-        currentChunk = '';
-      }
-
-      // Split del paragrafo lungo per frasi
-      const sentenceChunks = splitLongParagraph(paragraph, maxChunkSize, chunkOverlap);
-      sentenceChunks.forEach(sentenceChunk => {
-        chunks.push(createChunk(sentenceChunk, chunkIndex++, currentStartChar));
-        currentStartChar += sentenceChunk.length;
-      });
-      
+    // Filtra chunks troppo piccoli ma mantieni la posizione corretta
+    if (chunkText.trim().length < minChunkSize) {
+      currentStartChar += chunkLength; // Avanza comunque la posizione
       continue;
     }
 
-    // Verifica se aggiungere questo paragrafo supererebbe maxChunkSize
-    const potentialChunk = currentChunk 
-      ? currentChunk + '\n\n' + paragraph 
-      : paragraph;
+    chunks.push({
+      text: chunkText,
+      index: chunkIndex, // Usa il contatore sequenziale, non l'indice del loop
+      metadata: {
+        startChar: currentStartChar,
+        endChar: currentStartChar + chunkLength,
+        wordCount: countWords(chunkText),
+      },
+    });
 
-    if (potentialChunk.length > maxChunkSize && currentChunk.trim()) {
-      // Salva il chunk corrente
-      chunks.push(createChunk(currentChunk.trim(), chunkIndex++, currentStartChar));
-      
-      // Inizia un nuovo chunk con overlap
-      const overlapText = getOverlapText(currentChunk, chunkOverlap);
-      currentChunk = overlapText ? overlapText + '\n\n' + paragraph : paragraph;
-      currentStartChar += currentChunk.length - overlapText.length;
-    } else {
-      currentChunk = potentialChunk;
-    }
-  }
-
-  // Aggiungi l'ultimo chunk se non vuoto
-  if (currentChunk.trim() && currentChunk.trim().length >= minChunkSize) {
-    chunks.push(createChunk(currentChunk.trim(), chunkIndex++, currentStartChar));
+    chunkIndex++; // Incrementa solo per i chunks validi
+    currentStartChar += chunkLength;
   }
 
   return chunks;
 }
 
 /**
- * Split di un paragrafo lungo per frasi
+ * Versione sincrona per backward compatibility
+ * Wrappa la versione async per mantenere l'interfaccia esistente
  */
-function splitLongParagraph(
-  paragraph: string,
-  maxChunkSize: number,
-  overlap: number
-): string[] {
-  const sentences = paragraph.match(/[^.!?]+[.!?]+/g) || [paragraph];
-  const chunks: string[] = [];
-  let currentChunk = '';
-
-  for (const sentence of sentences) {
-    const trimmedSentence = sentence.trim();
-    
-    if ((currentChunk + ' ' + trimmedSentence).length > maxChunkSize) {
-      if (currentChunk) {
-        chunks.push(currentChunk.trim());
-        // Aggiungi overlap
-        const overlapText = getOverlapText(currentChunk, overlap);
-        currentChunk = overlapText + ' ' + trimmedSentence;
-      } else {
-        // La singola frase è troppo lunga, la splittiamo per parole
-        chunks.push(...splitByWords(trimmedSentence, maxChunkSize, overlap));
-        currentChunk = '';
-      }
-    } else {
-      currentChunk = currentChunk ? currentChunk + ' ' + trimmedSentence : trimmedSentence;
-    }
-  }
-
-  if (currentChunk.trim()) {
-    chunks.push(currentChunk.trim());
-  }
-
-  return chunks;
-}
-
-/**
- * Split per parole quando anche le frasi sono troppo lunghe
- */
-function splitByWords(
+export function chunkTextSync(
   text: string,
-  maxChunkSize: number,
-  overlap: number
-): string[] {
-  const words = text.split(/\s+/);
-  const chunks: string[] = [];
-  let currentChunk = '';
+  options: ChunkOptions = {}
+): Chunk[] {
+  // Per mantenere backward compatibility, usiamo un approccio semplificato sincrono
+  const {
+    maxChunkSize = 1000,
+    chunkOverlap = 200,
+    minChunkSize = 100,
+  } = options;
 
-  for (const word of words) {
-    if ((currentChunk + ' ' + word).length > maxChunkSize) {
-      if (currentChunk) {
-        chunks.push(currentChunk.trim());
-        const overlapText = getOverlapText(currentChunk, overlap);
-        currentChunk = overlapText + ' ' + word;
-      } else {
-        // Singola parola troppo lunga, la tronchiamo
-        chunks.push(word.substring(0, maxChunkSize));
-        currentChunk = word.substring(maxChunkSize);
-      }
-    } else {
-      currentChunk = currentChunk ? currentChunk + ' ' + word : word;
-    }
+  if (!text || text.trim().length === 0) {
+    return [];
   }
 
-  if (currentChunk.trim()) {
-    chunks.push(currentChunk.trim());
+  const normalizedText = text.replace(/\r\n/g, '\n').trim();
+  
+  if (normalizedText.length <= maxChunkSize) {
+    return [{
+      text: normalizedText,
+      index: 0,
+      metadata: {
+        startChar: 0,
+        endChar: normalizedText.length,
+        wordCount: countWords(normalizedText),
+      },
+    }];
+  }
+
+  // Split semplice per versione sincrona
+  const chunks: Chunk[] = [];
+  const separators = ['\n\n', '\n', '. ', '! ', '? ', '; ', ' '];
+  
+  let remainingText = normalizedText;
+  let chunkIndex = 0;
+  let startChar = 0;
+
+  while (remainingText.length > 0) {
+    let chunkEnd = Math.min(maxChunkSize, remainingText.length);
+    
+    // Se non siamo alla fine, cerca un separatore naturale
+    if (chunkEnd < remainingText.length) {
+      for (const separator of separators) {
+        const lastIndex = remainingText.lastIndexOf(separator, chunkEnd);
+        if (lastIndex > chunkEnd * 0.7) { // Almeno 70% del chunk
+          chunkEnd = lastIndex + separator.length;
+          break;
+        }
+      }
+    }
+
+    const chunkText = remainingText.substring(0, chunkEnd).trim();
+    
+    if (chunkText.length >= minChunkSize) {
+      chunks.push({
+        text: chunkText,
+        index: chunkIndex++,
+        metadata: {
+          startChar,
+          endChar: startChar + chunkText.length,
+          wordCount: countWords(chunkText),
+        },
+      });
+    }
+
+    // Muovi avanti con overlap
+    const moveBy = Math.max(chunkEnd - chunkOverlap, 1);
+    remainingText = remainingText.substring(moveBy);
+    startChar += moveBy;
   }
 
   return chunks;
-}
-
-/**
- * Ottiene il testo di overlap dalla fine del chunk precedente
- */
-function getOverlapText(text: string, overlapSize: number): string {
-  if (text.length <= overlapSize) {
-    return text;
-  }
-
-  // Cerca l'ultimo punto/newline nell'area di overlap per mantenere contesto semantico
-  const overlapText = text.slice(-overlapSize);
-  const lastSentenceEnd = Math.max(
-    overlapText.lastIndexOf('. '),
-    overlapText.lastIndexOf('\n')
-  );
-
-  if (lastSentenceEnd > overlapSize / 2) {
-    return overlapText.slice(lastSentenceEnd + 1).trim();
-  }
-
-  return overlapText.trim();
-}
-
-/**
- * Crea un oggetto Chunk con metadata
- */
-function createChunk(text: string, index: number, startChar: number): Chunk {
-  return {
-    text,
-    index,
-    metadata: {
-      startChar,
-      endChar: startChar + text.length,
-      wordCount: countWords(text),
-    },
-  };
 }
 
 /**
@@ -240,7 +239,14 @@ export function extractTextFromPendingItem(item: any): string {
       return `${item.content.title ? item.content.title + '\n\n' : ''}${item.content.text || ''}`;
     
     case 'website':
-      return `${item.content.title}\n\n${item.content.description}\n\nURL: ${item.content.url}`;
+      // Usa il contenuto completo estratto da Readability
+      if (item.content.textContent && item.content.textContent.trim().length > 0) {
+        // Nuovo formato con contenuto completo
+        return `${item.content.title}\n\nSource: ${item.content.url}\n\n${item.content.textContent}`;
+      } else {
+        // Fallback per vecchi dati (solo titolo + descrizione)
+        return `${item.content.title}\n\n${item.content.description || ''}\n\nURL: ${item.content.url}`;
+      }
     
     case 'docs':
       return `${item.content.title || item.content.filename}\n\n${item.content.text || ''}`;
@@ -259,13 +265,33 @@ export function extractTextFromPendingItem(item: any): string {
 }
 
 /**
- * Genera chunks ottimizzati per un PendingItem
+ * Genera chunks ottimizzati per un PendingItem (versione async con LangChain)
  */
-export function chunkPendingItem(
+export async function chunkPendingItem(
+  item: any,
+  options: ChunkOptions = {}
+): Promise<Chunk[]> {
+  const text = extractTextFromPendingItem(item);
+  // Passa il tipo di source per chunking adattivo
+  const enhancedOptions = {
+    ...options,
+    sourceType: item.type as ChunkOptions['sourceType'],
+  };
+  return await chunkText(text, enhancedOptions);
+}
+
+/**
+ * Versione sincrona di chunkPendingItem per backward compatibility
+ */
+export function chunkPendingItemSync(
   item: any,
   options: ChunkOptions = {}
 ): Chunk[] {
   const text = extractTextFromPendingItem(item);
-  return chunkText(text, options);
+  const enhancedOptions = {
+    ...options,
+    sourceType: item.type as ChunkOptions['sourceType'],
+  };
+  return chunkTextSync(text, enhancedOptions);
 }
 

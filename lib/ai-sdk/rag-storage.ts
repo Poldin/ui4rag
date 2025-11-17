@@ -113,8 +113,12 @@ export class RAGStorage {
 
       const sourceId = sourceResult.rows[0].id;
 
-      // 2. Chunking del contenuto
-      const chunks = chunkText(content, chunkOptions);
+      // 2. Chunking del contenuto con LangChain (chunking adattivo)
+      const enhancedOptions = {
+        ...chunkOptions,
+        sourceType: sourceType,
+      };
+      const chunks = await chunkText(content, enhancedOptions);
 
       if (chunks.length === 0) {
         await client.query('ROLLBACK');

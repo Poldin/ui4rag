@@ -11,6 +11,9 @@ interface PageData {
   url: string;
   title: string;
   description: string;
+  content?: string; // HTML pulito da Readability
+  textContent?: string; // Testo plain
+  excerpt?: string;
   depth: number;
   wordCount: number;
   selected?: boolean;
@@ -258,11 +261,13 @@ export default function WebsiteSourcePage() {
       const items = selectedPages.map(page => ({
         type: 'website' as const,
         title: page.title || page.url,
-        preview: page.description || `Scraped from ${page.url}`,
+        preview: page.excerpt || page.description || `Scraped from ${page.url}`,
         content: {
           url: page.url,
           title: page.title,
           description: page.description,
+          textContent: page.textContent || '', // ← Contenuto completo per RAG
+          excerpt: page.excerpt,
           depth: page.depth,
         },
         metadata: {

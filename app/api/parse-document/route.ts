@@ -41,47 +41,98 @@ export async function POST(request: NextRequest) {
     // Parse in base al tipo di file
     if (fileExtension === 'txt' || fileExtension === 'md') {
       // File di testo semplice
-      extractedText = buffer.toString('utf-8');
+      try {
+        extractedText = buffer.toString('utf-8');
+        // Se il buffer è vuoto o corrotto, utf-8 potrebbe fallire silenziosamente
+        if (!extractedText || extractedText.trim().length === 0) {
+          throw new Error('Text file appears to be empty');
+        }
+      } catch (txtError: any) {
+        throw new Error(`Failed to read text file: ${txtError.message}`);
+      }
     } else if (fileExtension === 'pdf') {
-      // Estrazione reale da PDF usando unpdf (semplice e compatibile con bundler moderni)
+      // Estrazione PDF usando unpdf (semplice e funziona bene)
       try {
         const { extractText, getDocumentProxy } = await import('unpdf');
         
-        // Converti Buffer in Uint8Array (richiesto da pdfjs sotto il cofano)
+        // Converti Buffer in Uint8Array
         const uint8Array = new Uint8Array(buffer);
         
-        // Estrai il testo dal PDF - semplicissimo!
+        // Estrai il documento PDF
         const data = await getDocumentProxy(uint8Array);
         pages = data.numPages;
         
-        // Estrai il testo
-        const pdfText = await extractText(data, { mergePages: true });
-        extractedText = pdfText.text;
+        // Estrai tutto il testo dal PDF
+        const result = await extractText(data, { mergePages: true });
+        extractedText = result.text;
+        
+        console.log(`PDF parsed: ${pages} pages, ${extractedText.length} characters extracted`);
+        
+        // Validazione per PDF con poco testo (probabilmente scannerizzati)
+        if (!extractedText || extractedText.trim().length < 50) {
+          console.warn(`PDF has very little text (${extractedText.trim().length} chars) - likely scanned`);
+          
+          throw new Error(
+            `This PDF appears to be a scanned document (only ${extractedText.trim().length} characters found). ` +
+            `Scanned PDFs contain images instead of text. To use this document:\n\n` +
+            `• Convert it to text using an OCR tool (Adobe Acrobat, Google Drive, etc.)\n` +
+            `• Use a native PDF with selectable text instead\n` +
+            `• Or upload the document as images and use an OCR service separately`
+          );
+        }
       } catch (pdfError: any) {
         console.error('PDF parsing error details:', pdfError);
-        throw new Error(`Failed to parse PDF: ${pdfError.message}`);
+        // Messaggio più descrittivo
+        if (pdfError.message && pdfError.message.includes('password')) {
+          throw new Error('This PDF is password-protected. Please provide an unencrypted version.');
+        } else if (pdfError.message && pdfError.message.includes('Invalid')) {
+          throw new Error('Invalid or corrupted PDF file. Please ensure the file is a valid PDF document.');
+        } else {
+          throw new Error(`Failed to parse PDF: ${pdfError.message || 'Unknown error'}. The file might be corrupted or use an unsupported PDF format.`);
+        }
       }
     } else if (fileExtension === 'docx') {
-      // Estrazione reale da DOCX usando mammoth (dynamic import per compatibilità Turbopack)
+      // Estrazione DOCX usando mammoth (ben mantenuto e robusto)
       try {
         const mammoth = await import('mammoth');
         const result = await mammoth.extractRawText({ buffer });
         extractedText = result.value;
-        // DOCX non ha un numero di pagine fisso, stimiamo
-        pages = Math.ceil(extractedText.length / 3000);
+        
+        // Verifica messaggi di warning da mammoth
+        if (result.messages && result.messages.length > 0) {
+          console.log('DOCX parsing warnings:', result.messages);
+        }
+        
+        // DOCX non ha un numero di pagine fisso, stimiamo (circa 3000 caratteri per pagina)
+        pages = Math.max(1, Math.ceil(extractedText.length / 3000));
+        
+        console.log(`DOCX parsed successfully: ~${pages} pages, ${extractedText.length} characters`);
+        
+        if (!extractedText || extractedText.trim().length === 0) {
+          throw new Error('DOCX appears to contain no text. The document might contain only images or be empty.');
+        }
       } catch (docxError: any) {
-        throw new Error(`Failed to parse DOCX: ${docxError.message}`);
+        console.error('DOCX parsing error details:', docxError);
+        throw new Error(`Failed to parse DOCX: ${docxError.message}. Ensure the file is a valid Word document (.docx format).`);
       }
     } else if (fileExtension === 'pptx') {
-      // Estrazione reale da PPTX usando officeparser (dynamic import per compatibilità Turbopack)
+      // Estrazione PPTX usando officeparser
       try {
         const officeParser = (await import('officeparser')).default;
         const text = await officeParser.parseOfficeAsync(buffer);
-        extractedText = text;
-        // PPTX: stimiamo le slide (circa 500 caratteri per slide)
+        extractedText = text || '';
+        
+        // PPTX: stimiamo le slide (circa 500 caratteri per slide in media)
         pages = Math.max(1, Math.ceil(extractedText.length / 500));
+        
+        console.log(`PPTX parsed successfully: ~${pages} slides, ${extractedText.length} characters`);
+        
+        if (!extractedText || extractedText.trim().length === 0) {
+          throw new Error('PowerPoint appears to contain no text. The slides might contain only images or be empty.');
+        }
       } catch (pptxError: any) {
-        throw new Error(`Failed to parse PPTX: ${pptxError.message}`);
+        console.error('PPTX parsing error details:', pptxError);
+        throw new Error(`Failed to parse PowerPoint: ${pptxError.message}. Ensure the file is a valid PowerPoint presentation (.pptx format).`);
       }
     }
 
@@ -105,8 +156,7 @@ export async function POST(request: NextRequest) {
       wordCount: wordCount,
       textPreview: textPreview,
       fullText: extractedText,
-      // Il titolo è semplicemente il nome del file senza estensione
-      title: file.name.replace(/\.[^/.]+$/, '')
+      title: file.name.replace(/\.[^/.]+$/, ''),
     };
 
     return NextResponse.json({
