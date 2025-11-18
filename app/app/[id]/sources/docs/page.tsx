@@ -106,7 +106,7 @@ export default function DocsSourcePage() {
 
       try {
         // Verifica dimensione (max 10MB per UI, con margine funzionale a 12MB)
-        const MAX_FILE_SIZE_UI = 10 * 1024 * 1024; // 10MB - limite mostrato all'utente
+        const MAX_FILE_SIZE_UI = 50 * 1024 * 1024; // 10MB - limite mostrato all'utente
         const MAX_FILE_SIZE_FUNC = 50 * 1024 * 1024; // 12MB - limite funzionale reale
         
         if (file.size > MAX_FILE_SIZE_UI) {
