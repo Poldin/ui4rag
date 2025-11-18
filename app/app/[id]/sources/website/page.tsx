@@ -11,7 +11,7 @@ interface PageData {
   url: string;
   title: string;
   description: string;
-  content?: string; // HTML pulito da Readability
+  content?: string; // HTML pulito estratto con cheerio
   textContent?: string; // Testo plain
   excerpt?: string;
   depth: number;
