@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { Upload, Loader2, Check, X, FileText, AlertTriangle } from "lucide-react";
 import PendingChanges from "../../../../components/PendingChanges";
 import { addToPendingChangesWithChunking } from "../../../../../lib/utils/pending-changes-helper";
+import { createDocumentChunks } from "../../../../../lib/utils/document-chunker";
 import { pendingChangesEvents } from "../../../../../lib/events/pending-changes-events";
 
 interface DocumentData {
@@ -104,16 +105,28 @@ export default function DocsSourcePage() {
       const docId = placeholders[i].id;
 
       try {
-        // Verifica dimensione (max 100MB)
-        if (file.size > 100 * 1024 * 1024) {
+        // Verifica dimensione (max 10MB per UI, con margine funzionale a 12MB)
+        const MAX_FILE_SIZE_UI = 10 * 1024 * 1024; // 10MB - limite mostrato all'utente
+        const MAX_FILE_SIZE_FUNC = 50 * 1024 * 1024; // 12MB - limite funzionale reale
+        
+        if (file.size > MAX_FILE_SIZE_UI) {
           setDocuments(prev =>
             prev.map(doc =>
               doc.id === docId
-                ? { ...doc, status: 'error', errorMessage: 'File too large (max 100MB)' }
+                ? { 
+                    ...doc, 
+                    status: 'error', 
+                    errorMessage: `File too large (max ${(MAX_FILE_SIZE_UI / (1024 * 1024)).toFixed(0)}MB). File size: ${(file.size / (1024 * 1024)).toFixed(2)}MB` 
+                  }
                 : doc
             )
           );
           continue;
+        }
+        
+        // Se supera il limite funzionale ma è sotto quello UI, avvisa ma procedi
+        if (file.size > MAX_FILE_SIZE_FUNC) {
+          console.warn(`File ${file.name} exceeds functional limit but is being processed: ${(file.size / (1024 * 1024)).toFixed(2)}MB`);
         }
 
         const formData = new FormData();
@@ -261,30 +274,60 @@ export default function DocsSourcePage() {
     setSaveSuccess(false);
 
     try {
-      const items = selectedDocs.map(doc => ({
-        type: 'docs' as const,
-        title: doc.title || doc.filename,
-        preview: doc.textPreview,
-        content: {
+      // Crea items, dividendo documenti grandi in chunk più piccoli
+      const items: Array<{
+        type: 'docs';
+        title: string;
+        preview: string;
+        content: any;
+        metadata: any;
+      }> = [];
+      
+      for (const doc of selectedDocs) {
+        // Crea chunk se il documento è troppo grande
+        const chunks = createDocumentChunks({
           filename: doc.filename,
           fileType: doc.fileType,
           pages: doc.pages,
-          text: doc.fullText,
-          title: doc.title,
-        },
-        metadata: {
           wordCount: doc.wordCount,
-          tokens: Math.ceil(doc.wordCount * 1.33),
           fileSize: doc.fileSize,
           fileSizeBytes: doc.fileSizeBytes,
-          pages: doc.pages,
-        },
-      }));
+          fullText: doc.fullText,
+          title: doc.title || doc.filename,
+        });
+        
+        // Converti i chunk in items per pending_changes
+        for (const chunk of chunks) {
+          items.push({
+            type: 'docs' as const,
+            title: chunk.title,
+            preview: chunk.preview,
+            content: chunk.content,
+            metadata: chunk.metadata,
+          });
+        }
+      }
 
       const result = await addToPendingChangesWithChunking(ragId, items);
+      
+      // Mostra un messaggio se i documenti sono stati divisi
+      const wasChunked = items.length > selectedDocs.length;
+      if (wasChunked) {
+        console.log(`📄 Documenti divisi: ${selectedDocs.length} documenti → ${items.length} chunk`);
+      }
 
       if (result.success) {
         setSaveSuccess(true);
+        
+        // Mostra un messaggio informativo se i documenti sono stati divisi
+        if (wasChunked) {
+          const message = `Documenti aggiunti al training! ${selectedDocs.length} documento${selectedDocs.length !== 1 ? 'i' : ''} ${selectedDocs.length !== 1 ? 'sono stati' : 'è stato'} diviso in ${items.length} parti per gestire le dimensioni.`;
+          // Mostra un alert più informativo
+          setTimeout(() => {
+            alert(message);
+          }, 100);
+        }
+        
         // Notifica il componente PendingChanges
         pendingChangesEvents.emit();
         // Rimuovi i documenti selezionati dopo 1 secondo
@@ -365,7 +408,7 @@ export default function DocsSourcePage() {
                   Click to upload or drag and drop
                 </p>
                 <p className="text-xs text-gray-600">
-                  PDF, DOCX, PPTX, TXT, MD (max 10 files, 100MB each)
+                  PDF, DOCX, PPTX, TXT, MD (max 10 files, 10MB each)
                 </p>
               </>
             )}
