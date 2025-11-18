@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useParams, useRouter } from "next/navigation";
-import { Settings, FileText, Globe, FileStack, MessageSquare, StickyNote, ChevronDown, ChevronRight, User, LogOut, CheckCircle2, AlertCircle, Search, BarChart3 } from "lucide-react";
+import { Settings, FileText, Globe, FileStack, MessageSquare, StickyNote, ChevronDown, ChevronRight, User, LogOut, CheckCircle2, AlertCircle, Search, BarChart3, Terminal } from "lucide-react";
 import { SiSupabase, SiPostgresql, SiPlanetscale, SiCockroachlabs } from "react-icons/si";
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
@@ -193,6 +193,19 @@ export default function Sidebar() {
         >
           <BarChart3 className="w-4 h-4" />
           <span>Trainings</span>
+        </Link>
+
+        {/* MCP Server */}
+        <Link
+          href={`/app/${ragId}/mcp`}
+          className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
+            pathname === `/app/${ragId}/mcp`
+              ? "bg-gray-200 text-gray-900"
+              : "text-gray-700 hover:bg-gray-100"
+          }`}
+        >
+          <Terminal className="w-4 h-4" />
+          <span>MCP</span>
         </Link>
 
         {/* Sources accordion */}

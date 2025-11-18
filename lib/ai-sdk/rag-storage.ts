@@ -379,5 +379,99 @@ export class RAGStorage {
       result.rows.map((row: any) => [row.source_id, parseInt(row.chunk_count)])
     );
   }
+
+  /**
+   * Keyword search avanzata con context window
+   * Usa PostgreSQL Full-Text Search per cercare keywords esatte
+   */
+  async keywordSearch(
+    keywords: string,
+    options: {
+      sourceId?: string;
+      contextLines?: number;
+      limit?: number;
+    } = {}
+  ): Promise<Array<{
+    sourceId: string;
+    sourceTitle: string;
+    sourceType: string;
+    chunkId: string;
+    chunkContent: string;
+    matchPosition: number;
+    context: string;
+    rank: number;
+    chunkIndex: number;
+    chunkTotal: number;
+  }>> {
+    const pool = this.getPool();
+    const { sourceId, contextLines = 10, limit = 20 } = options;
+
+    // Usa plainto_tsquery per convertire keywords in tsquery (gestisce automaticamente AND)
+    let query = `
+      WITH ranked_chunks AS (
+        SELECT 
+          c.id as chunk_id,
+          c.source_id,
+          c.content as chunk_content,
+          c.chunk_index,
+          c.chunk_total,
+          s.title as source_title,
+          s.source_type,
+          ts_rank(to_tsvector('english', c.content), plainto_tsquery('english', $1)) as rank,
+          position(lower($1) in lower(c.content)) as match_position
+        FROM ${this.config.chunksTableName} c
+        JOIN ${this.config.sourcesTableName} s ON c.source_id = s.id
+        WHERE to_tsvector('english', c.content) @@ plainto_tsquery('english', $1)
+    `;
+
+    const params: any[] = [keywords];
+
+    if (sourceId) {
+      params.push(sourceId);
+      query += ` AND c.source_id = $${params.length}`;
+    }
+
+    query += `
+        ORDER BY rank DESC, match_position ASC
+        LIMIT $${params.length + 1}
+      )
+      SELECT * FROM ranked_chunks
+    `;
+
+    params.push(limit);
+
+    const result = await pool.query(query, params);
+
+    // Formatta risultati con context
+    return result.rows.map((row) => {
+      const content = row.chunk_content;
+      const matchPos = row.match_position - 1; // 0-indexed
+
+      // Calcola context window (in caratteri, approssimato per linee)
+      const avgCharsPerLine = 80;
+      const contextChars = contextLines * avgCharsPerLine;
+
+      const start = Math.max(0, matchPos - contextChars);
+      const end = Math.min(content.length, matchPos + keywords.length + contextChars);
+
+      const context = content.substring(start, end);
+      const beforeContext = content.substring(start, matchPos);
+      const afterContext = content.substring(matchPos + keywords.length, end);
+
+      return {
+        sourceId: row.source_id,
+        sourceTitle: row.source_title,
+        sourceType: row.source_type,
+        chunkId: row.chunk_id,
+        chunkContent: content,
+        matchPosition: matchPos,
+        context: (start > 0 ? '...' : '') + context + (end < content.length ? '...' : ''),
+        rank: parseFloat((row.rank * 100).toFixed(2)),
+        chunkIndex: row.chunk_index,
+        chunkTotal: row.chunk_total,
+      };
+    });
+  }
 }
+
 

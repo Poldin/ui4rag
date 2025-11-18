@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "gimme-rag": {
+      "url": "https://your-app-domain.vercel.app/api/mcp",
+      "headers": {
+        "Authorization": "Bearer mcp_replace_with_your_api_key"
+      }
+    }
+  }
+}
+

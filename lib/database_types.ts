@@ -39,6 +39,56 @@ export type Database = {
   }
   public: {
     Tables: {
+      api_keys: {
+        Row: {
+          created_at: string | null
+          expires_at: string | null
+          id: string
+          is_active: boolean | null
+          key_hash: string
+          last_used_at: string | null
+          metadata: Json | null
+          name: string | null
+          rag_id: string
+          scopes: Json | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          expires_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          key_hash: string
+          last_used_at?: string | null
+          metadata?: Json | null
+          name?: string | null
+          rag_id: string
+          scopes?: Json | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          expires_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          key_hash?: string
+          last_used_at?: string | null
+          metadata?: Json | null
+          name?: string | null
+          rag_id?: string
+          scopes?: Json | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "api_keys_rag_id_fkey"
+            columns: ["rag_id"]
+            isOneToOne: false
+            referencedRelation: "rags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       crawling_logs: {
         Row: {
           created_at: string
@@ -156,7 +206,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      cleanup_expired_api_keys: { Args: never; Returns: number }
     }
     Enums: {
       [_ in never]: never
