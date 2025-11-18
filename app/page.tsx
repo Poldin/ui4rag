@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Terminal } from "lucide-react";
 import { SiSupabase, SiNextdotjs, SiOpenai } from "react-icons/si";
 import Header from "./components/Header";
 import Footer from "./components/Footer";
@@ -55,6 +55,10 @@ export default function LandingPage() {
             <div className="flex items-center gap-2">
               <LangChainIcon className="w-5 h-5 text-gray-700" />
               <span className="text-sm text-gray-700">LangChain</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Terminal className="w-5 h-5 text-gray-700" />
+              <span className="text-sm text-gray-700">MCP Server</span>
             </div>
           </div>
 
