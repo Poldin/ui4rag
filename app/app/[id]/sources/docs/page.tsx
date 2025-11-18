@@ -416,7 +416,7 @@ export default function DocsSourcePage() {
 
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-md flex items-start gap-2">
-              <X className="w-4 h-4 text-red-600 mt-0.5 flex-shrink-0" />
+              <X className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
               <p className="text-sm text-red-700">{error}</p>
             </div>
           )}
@@ -507,7 +507,7 @@ export default function DocsSourcePage() {
                   >
                     <div className="flex items-start gap-3">
                       {/* Status indicator */}
-                      <div className="flex-shrink-0 mt-1">
+                      <div className="shrink-0 mt-1">
                         {doc.status === 'processing' ? (
                           <Loader2 className="w-5 h-5 text-gray-400 animate-spin" />
                         ) : doc.status === 'error' ? (
