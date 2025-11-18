@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useParams } from "next/navigation";
 import { Upload, Loader2, Check, X, FileText, AlertTriangle } from "lucide-react";
 import PendingChanges from "../../../../components/PendingChanges";
-import { addToPendingChanges } from "../../../../../lib/actions/pending-changes";
+import { addToPendingChangesWithChunking } from "../../../../../lib/utils/pending-changes-helper";
 import { pendingChangesEvents } from "../../../../../lib/events/pending-changes-events";
 
 interface DocumentData {
@@ -281,7 +281,7 @@ export default function DocsSourcePage() {
         },
       }));
 
-      const result = await addToPendingChanges(ragId, items);
+      const result = await addToPendingChangesWithChunking(ragId, items);
 
       if (result.success) {
         setSaveSuccess(true);

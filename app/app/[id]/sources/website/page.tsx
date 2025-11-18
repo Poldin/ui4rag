@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import PendingChanges from "../../../../components/PendingChanges";
 import { Loader2, Check, X, Globe } from 'lucide-react';
-import { addToPendingChanges } from "../../../../../lib/actions/pending-changes";
+import { addToPendingChangesWithChunking } from "../../../../../lib/utils/pending-changes-helper";
 import { pendingChangesEvents } from "../../../../../lib/events/pending-changes-events";
 
 interface PageData {
@@ -278,7 +278,7 @@ export default function WebsiteSourcePage() {
         },
       }));
 
-      const result = await addToPendingChanges(ragId, items);
+      const result = await addToPendingChangesWithChunking(ragId, items);
 
       if (result.success) {
         setSaveSuccess(true);

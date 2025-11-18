@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 import { Plus, X, Copy, Upload, Check, Loader2 } from "lucide-react";
 import PendingChanges from "../../../../components/PendingChanges";
-import { addToPendingChanges } from "../../../../../lib/actions/pending-changes";
+import { addToPendingChangesWithChunking } from "../../../../../lib/utils/pending-changes-helper";
 import { pendingChangesEvents } from "../../../../../lib/events/pending-changes-events";
 
 interface QAPair {
@@ -119,7 +119,7 @@ export default function QASourcePage() {
         };
       });
 
-      const result = await addToPendingChanges(ragId, items);
+      const result = await addToPendingChangesWithChunking(ragId, items);
 
       if (result.success) {
         setSaveSuccess(true);

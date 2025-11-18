@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useParams } from "next/navigation";
 import PendingChanges from "../../../../components/PendingChanges";
-import { addToPendingChanges } from "../../../../../lib/actions/pending-changes";
+import { addToPendingChangesWithChunking } from "../../../../../lib/utils/pending-changes-helper";
 import { pendingChangesEvents } from "../../../../../lib/events/pending-changes-events";
 import { Loader2 } from "lucide-react";
 
@@ -27,7 +27,7 @@ export default function TextSourcePage() {
     setSaveSuccess(false);
 
     try {
-      const result = await addToPendingChanges(ragId, [
+      const result = await addToPendingChangesWithChunking(ragId, [
         {
           type: 'text',
           title: title || 'Untitled Text',
