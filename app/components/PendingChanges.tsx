@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { Zap, ChevronDown, ChevronUp, FileText, Globe, FileStack, MessageSquare, StickyNote, Loader2, X } from "lucide-react";
+import { Zap, ChevronDown, ChevronUp, FileText, Globe, FileStack, MessageSquare, StickyNote, Loader2, X, ScrollText, ChevronLeft, ChevronRight } from "lucide-react";
 import { getPendingChanges, clearPendingChanges, removeFromPendingChanges, type PendingItem } from "../../lib/actions/pending-changes";
 import { pendingChangesEvents } from "../../lib/events/pending-changes-events";
 
@@ -66,6 +66,15 @@ export default function PendingChanges({ alwaysVisible = false }: PendingChanges
     message: string;
     warnings: string[];
   } | null>(null);
+  
+  const [trainingLogs, setTrainingLogs] = useState<Array<{
+    type: string;
+    timestamp: Date;
+    message: string;
+    data?: any;
+  }>>([]);
+  
+  const [isLogsExpanded, setIsLogsExpanded] = useState(false);
 
   const handleRemoveItem = async (itemId: string) => {
     if (!ragId || !itemId) return;
@@ -94,6 +103,7 @@ export default function PendingChanges({ alwaysVisible = false }: PendingChanges
     if (!ragId || pendingItems.length === 0) return;
     
     setIsProcessing(true);
+    setTrainingLogs([]); // Reset logs
     setTrainingProgress({
       currentItem: 0,
       totalItems: pendingItems.length,
@@ -103,6 +113,13 @@ export default function PendingChanges({ alwaysVisible = false }: PendingChanges
       message: 'Initializing training...',
       warnings: [],
     });
+    
+    // Aggiungi log iniziale
+    setTrainingLogs(prev => [...prev, {
+      type: 'info',
+      timestamp: new Date(),
+      message: 'Training initialization started',
+    }]);
 
     try {
       const response = await fetch('/api/run-training', {
@@ -144,6 +161,15 @@ export default function PendingChanges({ alwaysVisible = false }: PendingChanges
             try {
               const message = JSON.parse(line);
               
+              // Aggiungi log per tutti i tipi di messaggi
+              const logEntry = {
+                type: message.type,
+                timestamp: new Date(),
+                message: message.data?.message || message.data?.itemTitle || JSON.stringify(message.data),
+                data: message.data,
+              };
+              setTrainingLogs(prev => [...prev, logEntry]);
+              
               switch (message.type) {
                 case 'start':
                   setTrainingProgress(prev => ({
@@ -178,6 +204,15 @@ export default function PendingChanges({ alwaysVisible = false }: PendingChanges
                   }));
                   break;
 
+                case 'item_processed':
+                  setTrainingLogs(prev => [...prev, {
+                    type: 'info',
+                    timestamp: new Date(),
+                    message: `Item processed: ${message.data.item} (${message.data.chunksCreated} chunks, ${message.data.tokensUsed} tokens)`,
+                    data: message.data,
+                  }]);
+                  break;
+
                 case 'info':
                   setTrainingProgress(prev => ({
                     ...prev!,
@@ -191,6 +226,14 @@ export default function PendingChanges({ alwaysVisible = false }: PendingChanges
                     ...prev!,
                     warnings: [...(prev?.warnings || []), message.data.message],
                   }));
+                  break;
+
+                case 'cleared':
+                  setTrainingLogs(prev => [...prev, {
+                    type: 'info',
+                    timestamp: new Date(),
+                    message: 'Pending changes cleared',
+                  }]);
                   break;
 
                 case 'complete':
@@ -214,6 +257,12 @@ export default function PendingChanges({ alwaysVisible = false }: PendingChanges
                   break;
 
                 case 'error':
+                  setTrainingLogs(prev => [...prev, {
+                    type: 'error',
+                    timestamp: new Date(),
+                    message: `ERROR: ${message.data.message}`,
+                    data: message.data,
+                  }]);
                   throw new Error(message.data.message);
               }
             } catch (parseError) {
@@ -225,6 +274,11 @@ export default function PendingChanges({ alwaysVisible = false }: PendingChanges
 
     } catch (error: any) {
       console.error('Training failed:', error);
+      setTrainingLogs(prev => [...prev, {
+        type: 'error',
+        timestamp: new Date(),
+        message: `CRITICAL ERROR: ${error.message}`,
+      }]);
       setTrainingProgress(prev => ({
         ...prev!,
         message: `❌ Training failed: ${error.message}`,
@@ -235,6 +289,41 @@ export default function PendingChanges({ alwaysVisible = false }: PendingChanges
       setIsProcessing(false);
       // NON resettare il progress automaticamente
       // L'utente può chiudere manualmente il pannello
+    }
+  };
+  
+  const formatLogTime = (date: Date) => {
+    return date.toLocaleTimeString('it-IT', { 
+      hour: '2-digit', 
+      minute: '2-digit', 
+      second: '2-digit',
+      fractionalSecondDigits: 3 
+    });
+  };
+  
+  const getLogIcon = (type: string) => {
+    switch (type) {
+      case 'error': return '❌';
+      case 'warning': return '⚠️';
+      case 'info': return 'ℹ️';
+      case 'start': return '🚀';
+      case 'progress': return '⏳';
+      case 'chunking': return '📦';
+      case 'chunk_processed': return '✓';
+      case 'item_processed': return '✅';
+      case 'complete': return '🎉';
+      case 'cleared': return '🗑️';
+      default: return '📝';
+    }
+  };
+  
+  const getLogColor = (type: string) => {
+    switch (type) {
+      case 'error': return 'text-red-600 bg-red-50';
+      case 'warning': return 'text-yellow-700 bg-yellow-50';
+      case 'info': return 'text-blue-600 bg-blue-50';
+      case 'complete': return 'text-green-700 bg-green-50';
+      default: return 'text-gray-700 bg-gray-50';
     }
   };
 
@@ -285,9 +374,96 @@ export default function PendingChanges({ alwaysVisible = false }: PendingChanges
           <span className="text-sm font-medium">{pendingItems.length}</span>
         </button>
       ) : (
-        // Expanded - Full Panel
-        <div className="w-96">
-          <div className="bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+        // Expanded - Full Panel with Logs
+        <div className="flex gap-2">
+          {/* Logs Panel - Collapsible */}
+          {trainingLogs.length > 0 && (
+            <div className={`bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden transition-all ${
+              isLogsExpanded ? 'w-80' : 'w-12'
+            }`}>
+              {isLogsExpanded ? (
+                <>
+                  {/* Logs Header */}
+                  <div className="bg-gray-800 border-b border-gray-700 px-3 py-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <ScrollText className="w-4 h-4 text-white" />
+                        <h3 className="text-xs font-semibold text-white">
+                          Training Logs
+                        </h3>
+                        <span className="text-xs text-gray-300">
+                          ({trainingLogs.length})
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => setIsLogsExpanded(false)}
+                        className="text-gray-400 hover:text-gray-200 transition-colors"
+                        title="Collapse logs"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                  
+                  {/* Logs Content */}
+                  <div className="max-h-[calc(100vh-200px)] overflow-y-auto p-2 space-y-1">
+                    {trainingLogs.map((log, idx) => (
+                      <div
+                        key={idx}
+                        className={`text-xs p-2 rounded border ${getLogColor(log.type)}`}
+                      >
+                        <div className="flex items-start gap-1.5">
+                          <span className="text-xs mt-0.5">{getLogIcon(log.type)}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              <span className="text-[10px] font-mono text-gray-500">
+                                {formatLogTime(log.timestamp)}
+                              </span>
+                              <span className="text-[10px] font-medium uppercase">
+                                {log.type}
+                              </span>
+                            </div>
+                            <p className="text-xs leading-relaxed break-words">
+                              {log.message}
+                            </p>
+                            {log.data && typeof log.data === 'object' && Object.keys(log.data).length > 0 && (
+                              <details className="mt-1">
+                                <summary className="text-[10px] text-gray-600 cursor-pointer hover:text-gray-800">
+                                  Details
+                                </summary>
+                                <pre className="text-[10px] mt-1 p-1 bg-white/50 rounded overflow-x-auto">
+                                  {JSON.stringify(log.data, null, 2)}
+                                </pre>
+                              </details>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                // Collapsed Logs - Button
+                <div className="h-[calc(100vh-200px)] flex flex-col">
+                  <button
+                    onClick={() => setIsLogsExpanded(true)}
+                    className="flex-1 flex flex-col items-center justify-center gap-1 p-2 hover:bg-gray-50 transition-colors"
+                    title="Expand logs"
+                  >
+                    <ScrollText className="w-5 h-5 text-gray-600" />
+                    <span className="text-[10px] font-medium text-gray-600">
+                      {trainingLogs.length}
+                    </span>
+                    <ChevronRight className="w-3 h-3 text-gray-400" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {/* Main Panel */}
+          <div className="w-96">
+            <div className="bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
             {/* Header */}
             <div className="bg-gray-900 border-b border-gray-800 px-4 py-3">
               <div className="flex items-center justify-between">
@@ -314,7 +490,7 @@ export default function PendingChanges({ alwaysVisible = false }: PendingChanges
             </div>
 
             {/* Content */}
-            <div className="p-3">
+            <div className="p-3 max-h-[calc(100vh-250px)] overflow-y-auto">
             <div className="space-y-2 mb-3 max-h-60 overflow-y-auto">
               {pendingItems.map((item) => (
                 <div
@@ -442,6 +618,7 @@ export default function PendingChanges({ alwaysVisible = false }: PendingChanges
               </div>
             )}
             </div>
+          </div>
           </div>
         </div>
       )}

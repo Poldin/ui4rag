@@ -42,10 +42,10 @@ export async function POST(request: NextRequest) {
           return;
         }
 
-        // Carica RAG con config e pending_changes
+        // Carica RAG con config
         const { data: ragData, error: ragError } = await supabase
           .from('rags')
-          .select('config, pending_changes')
+          .select('config')
           .eq('id', ragId)
           .eq('user_id', user.id)
           .single();
@@ -57,7 +57,44 @@ export async function POST(request: NextRequest) {
         }
 
         const config = ragData.config as any;
-        const pendingItems = (ragData.pending_changes as any[]) || [];
+
+        // Carica pending_changes dalla tabella dedicata
+        const { data: pendingRecords, error: pendingError } = await supabase
+          .from('pending_changes')
+          .select('id, content, created_at')
+          .eq('rag_id', ragId)
+          .eq('is_active', true)
+          .order('created_at', { ascending: true });
+
+        if (pendingError) {
+          console.error('Error fetching pending changes:', pendingError);
+          sendMessage('error', { message: 'Failed to load pending changes' });
+          controller.close();
+          return;
+        }
+
+        // Trasforma i record in formato PendingItem per compatibilità
+        // Filtra i record con content null e mappa solo quelli validi
+        const pendingItems = (pendingRecords || [])
+          .filter(record => record.content !== null)
+          .map(record => {
+            const content = record.content as {
+              type: "text" | "website" | "docs" | "qa" | "notion";
+              title: string;
+              preview: string;
+              content: any;
+              metadata?: any;
+            };
+            return {
+              id: record.id,
+              type: content.type,
+              title: content.title,
+              preview: content.preview,
+              content: content.content,
+              metadata: content.metadata,
+              addedAt: record.created_at,
+            };
+          });
 
         // Verifica configurazione
         if (!config?.apiKey || !config?.connectionString || !config?.sourcesTableName || !config?.chunksTableName) {
@@ -152,7 +189,7 @@ export async function POST(request: NextRequest) {
               const result = await ragStorage.saveSource(
                 item.title || `Untitled (${item.type})`,
                 content,
-                item.type,
+                item.type as 'text' | 'website' | 'docs' | 'qa' | 'notion',
                 metadata,
                 {
                   maxChunkSize: 1000,
@@ -218,18 +255,21 @@ export async function POST(request: NextRequest) {
             console.error('Failed to save training log:', trainingLogError);
           }
 
-          // Svuota pending_changes solo se non ci sono errori CRITICI
+          // Soft delete: imposta is_active=false per i pending changes processati
+          // Conserva i dati per audit trail
           if (stats.processedItems > 0) {
-            await supabase
-              .from('rags')
-              .update({
-                pending_changes: [] as any,
-                updated_at: new Date().toISOString(),
-              })
-              .eq('id', ragId)
-              .eq('user_id', user.id);
+            const { error: clearError } = await supabase
+              .from('pending_changes')
+              .update({ is_active: false })
+              .eq('rag_id', ragId)
+              .eq('is_active', true);
 
-            sendMessage('cleared', { message: 'Pending changes cleared' });
+            if (clearError) {
+              console.error('Error clearing pending changes:', clearError);
+              sendMessage('warning', { message: 'Failed to clear pending changes, but training completed' });
+            } else {
+              sendMessage('cleared', { message: 'Pending changes cleared' });
+            }
           }
 
           // Invia statistiche finali

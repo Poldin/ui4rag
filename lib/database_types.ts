@@ -118,6 +118,38 @@ export type Database = {
           },
         ]
       }
+      pending_changes: {
+        Row: {
+          content: Json | null
+          created_at: string
+          id: string
+          is_active: boolean | null
+          rag_id: string | null
+        }
+        Insert: {
+          content?: Json | null
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          rag_id?: string | null
+        }
+        Update: {
+          content?: Json | null
+          created_at?: string
+          id?: string
+          is_active?: boolean | null
+          rag_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pending_changes_rag_id_fkey"
+            columns: ["rag_id"]
+            isOneToOne: false
+            referencedRelation: "rags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       rags: {
         Row: {
           config: Json | null
