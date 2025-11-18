@@ -8,6 +8,7 @@ import SourcesShowcase from "./components/SourcesShowcase";
 import SearchCarousel from "./components/SearchCarousel";
 import TrainingDemo from "./components/TrainingDemo";
 import RoadmapSection from "./components/RoadmapSection";
+import MCPToolsDemo from "./components/MCPToolsDemo";
 
 // LangChain Icon Component (parrot + chain logo)
 function LangChainIcon({ className }: { className?: string }) {
@@ -64,7 +65,7 @@ export default function LandingPage() {
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link
-              href="/signup"
+              href="/signin"
               className="px-6 py-3 bg-black text-white rounded-lg font-medium hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
             >
               Get started
@@ -86,6 +87,13 @@ export default function LandingPage() {
         </div>
         <div className="max-w-4xl mx-auto bg-linear-to-br from-gray-50 to-gray-100 rounded-2xl p-8 border border-gray-200 shadow-lg" style={{ minHeight: '500px' }}>
           <SearchCarousel />
+        </div>
+      </div>
+
+      {/* MCP Tools Demo Section */}
+      <div className="bg-gray-50 py-16">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+          <MCPToolsDemo />
         </div>
       </div>
 
@@ -157,7 +165,7 @@ export default function LandingPage() {
             Create your account and start managing your RAG content in minutes. No credit card required.
           </p>
           <Link
-            href="/signup"
+            href="/signin"
             className="inline-flex items-center gap-2 px-8 py-4 bg-white text-gray-900 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
           >
             Get started
