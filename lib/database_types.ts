@@ -118,6 +118,48 @@ export type Database = {
           },
         ]
       }
+      mcp_logs: {
+        Row: {
+          apikey_id: string | null
+          created_at: string
+          id: string
+          metadata: Json | null
+          origin: Json | null
+          rag_id: string | null
+        }
+        Insert: {
+          apikey_id?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          origin?: Json | null
+          rag_id?: string | null
+        }
+        Update: {
+          apikey_id?: string | null
+          created_at?: string
+          id?: string
+          metadata?: Json | null
+          origin?: Json | null
+          rag_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcp_logs_apikey_id_fkey"
+            columns: ["apikey_id"]
+            isOneToOne: false
+            referencedRelation: "api_keys"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "mcp_logs_rag_id_fkey"
+            columns: ["rag_id"]
+            isOneToOne: false
+            referencedRelation: "rags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       pending_changes: {
         Row: {
           content: Json | null

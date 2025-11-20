@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter } from "next/navigation";
 import { 
   Key, 
   Plus, 
@@ -15,7 +15,9 @@ import {
   EyeOff,
   X,
   Terminal,
-  Settings
+  Settings,
+  FileText,
+  Activity
 } from "lucide-react";
 import { supabase } from "../../../../lib/supabase";
 
@@ -30,7 +32,13 @@ interface ApiKey {
 
 export default function MCPPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const ragId = params.id as string;
+
+  // Leggi il tab dall'URL, default a 'config'
+  const tabFromUrl = searchParams.get('tab') as 'config' | 'logs' | null;
+  const initialTab = (tabFromUrl === 'config' || tabFromUrl === 'logs') ? tabFromUrl : 'config';
 
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,9 +58,31 @@ export default function MCPPage() {
   const [copiedMarkdown, setCopiedMarkdown] = useState(false);
   const [showKey, setShowKey] = useState(false);
   
-  // Tab states
+  // Main tab state (Configuration or Usage Logs)
+  const [mainTab, setMainTab] = useState<'config' | 'logs'>(initialTab);
+  
+  // Funzione per cambiare tab e aggiornare l'URL
+  const handleTabChange = (tab: 'config' | 'logs') => {
+    setMainTab(tab);
+    // Aggiorna l'URL senza ricaricare la pagina
+    const newSearchParams = new URLSearchParams(searchParams.toString());
+    if (tab === 'config') {
+      // Rimuovi il parametro tab se è 'config' (default)
+      newSearchParams.delete('tab');
+    } else {
+      newSearchParams.set('tab', tab);
+    }
+    router.replace(`/app/${ragId}/mcp?${newSearchParams.toString()}`, { scroll: false });
+  };
+  
+  // Tab states for code examples
   const [activeTab, setActiveTab] = useState<'typescript' | 'python' | 'curl' | 'claude'>('typescript');
   const [activeModalTab, setActiveModalTab] = useState<'claude' | 'typescript' | 'curl'>('claude');
+  
+  // Usage logs state
+  const [logs, setLogs] = useState<any[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsTotal, setLogsTotal] = useState(0);
 
   // Load RAG info and keys
   useEffect(() => {
@@ -183,6 +213,44 @@ export default function MCPPage() {
     const date = new Date(dateString);
     return date.toLocaleDateString() + " " + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
+
+  const formatDateTime = (dateString: string) => {
+    const date = new Date(dateString);
+    return date.toLocaleString([], { 
+      year: 'numeric', 
+      month: 'short', 
+      day: 'numeric', 
+      hour: '2-digit', 
+      minute: '2-digit',
+      second: '2-digit'
+    });
+  };
+
+  const loadLogs = async () => {
+    setLogsLoading(true);
+    try {
+      const response = await fetch(`/api/mcp/logs?ragId=${ragId}&limit=100`);
+      const data = await response.json();
+      
+      if (data.success) {
+        setLogs(data.logs);
+        setLogsTotal(data.total);
+      }
+    } catch (error) {
+      console.error("Error loading logs:", error);
+    } finally {
+      setLogsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (mainTab === 'logs') {
+      loadLogs();
+      // Refresh logs every 10 seconds when on logs tab
+      const interval = setInterval(loadLogs, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [mainTab, ragId]);
 
   const generateMarkdownDocs = () => {
     return `# MCP Server API Documentation
@@ -533,37 +601,73 @@ If an error occurs, the server returns a JSON-RPC error response:
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Terminal className="w-5 h-5 text-gray-700" />
-            <h1 className="text-xl font-semibold text-gray-900">MCP Server</h1>
-            {isConfigComplete ? (
-              <div className="flex items-center gap-1.5 px-2 py-1 bg-green-50 border border-green-200 rounded-md">
-                <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
-                <span className="text-xs font-medium text-green-700">Ready</span>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5 px-2 py-1 bg-yellow-50 border border-yellow-200 rounded-md">
-                <AlertCircle className="w-3.5 h-3.5 text-yellow-600" />
-                <span className="text-xs font-medium text-yellow-700">Config needed</span>
-              </div>
+      <div className="border-b border-gray-200">
+        <div className="px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Terminal className="w-5 h-5 text-gray-700" />
+              <h1 className="text-xl font-semibold text-gray-900">MCP Server</h1>
+              {isConfigComplete ? (
+                <div className="flex items-center gap-1.5 px-2 py-1 bg-green-50 border border-green-200 rounded-md">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-green-600" />
+                  <span className="text-xs font-medium text-green-700">Ready</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 px-2 py-1 bg-yellow-50 border border-yellow-200 rounded-md">
+                  <AlertCircle className="w-3.5 h-3.5 text-yellow-600" />
+                  <span className="text-xs font-medium text-yellow-700">Config needed</span>
+                </div>
+              )}
+            </div>
+            {mainTab === 'config' && (
+              <button
+                onClick={() => setShowGenerateModal(true)}
+                disabled={!isConfigComplete}
+                className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm rounded-md hover:bg-gray-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed font-medium"
+              >
+                <Plus className="w-4 h-4" />
+                Generate API Key
+              </button>
             )}
           </div>
+        </div>
+        
+        {/* Main Tabs */}
+        <div className="flex border-t border-gray-200 bg-gray-50">
           <button
-            onClick={() => setShowGenerateModal(true)}
-            disabled={!isConfigComplete}
-            className="flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm rounded-md hover:bg-gray-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed font-medium"
+            onClick={() => handleTabChange('config')}
+            className={`flex items-center gap-2 px-6 py-3 text-sm font-medium transition-colors ${
+              mainTab === 'config'
+                ? 'bg-white text-gray-900 border-b-2 border-gray-900'
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+            }`}
           >
-            <Plus className="w-4 h-4" />
-            Generate API Key
+            <Settings className="w-4 h-4" />
+            Configuration
+          </button>
+          <button
+            onClick={() => handleTabChange('logs')}
+            className={`flex items-center gap-2 px-6 py-3 text-sm font-medium transition-colors ${
+              mainTab === 'logs'
+                ? 'bg-white text-gray-900 border-b-2 border-gray-900'
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+            }`}
+          >
+            <Activity className="w-4 h-4" />
+            Usage Logs
+            {logsTotal > 0 && (
+              <span className="px-1.5 py-0.5 bg-gray-200 text-gray-700 text-xs font-medium rounded">
+                {logsTotal}
+              </span>
+            )}
           </button>
         </div>
       </div>
 
       {/* Content */}
       <div className="flex-1 px-6 py-6 overflow-y-auto">
-        <div className="max-w-4xl space-y-6">
+        {mainTab === 'config' ? (
+          <div className="max-w-4xl space-y-6">
           {/* Warning if config incomplete */}
           {!isConfigComplete && (
             <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
@@ -1142,6 +1246,160 @@ If an error occurs, the server returns a JSON-RPC error response:
             </div>
           </div>
         </div>
+        ) : (
+          /* Usage Logs Tab */
+          <div className="max-w-6xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-medium text-gray-900">Usage Logs</h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  View all MCP server requests and responses
+                </p>
+              </div>
+              <button
+                onClick={loadLogs}
+                disabled={logsLoading}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {logsLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Loading...</span>
+                  </>
+                ) : (
+                  <>
+                    <Activity className="w-4 h-4" />
+                    <span>Refresh</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            {logsLoading && logs.length === 0 ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+              </div>
+            ) : logs.length === 0 ? (
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-8 text-center">
+                <Activity className="w-8 h-8 text-gray-400 mx-auto mb-3" />
+                <p className="text-sm text-gray-600">No logs yet</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  MCP server usage logs will appear here once you start making requests
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {logs.map((log) => {
+                  const metadata = log.metadata || {};
+                  const origin = log.origin || {};
+                  const isSuccess = metadata.success !== false;
+                  const apiKey = (log as any).api_keys;
+                  const apiKeyName = apiKey?.name || 'Unnamed key';
+                  
+                  return (
+                    <div
+                      key={log.id}
+                      className={`bg-white border rounded-lg p-4 ${
+                        isSuccess ? 'border-gray-200' : 'border-red-200 bg-red-50'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2 flex-wrap">
+                            <div className={`w-2 h-2 rounded-full ${
+                              isSuccess ? 'bg-green-500' : 'bg-red-500'
+                            }`} />
+                            <code className="text-sm font-semibold text-gray-900">
+                              {metadata.method || 'unknown'}
+                            </code>
+                            {metadata.tool && (
+                              <>
+                                <span className="text-gray-400">/</span>
+                                <code className="text-sm font-medium text-gray-700">
+                                  {metadata.tool}
+                                </code>
+                              </>
+                            )}
+                            <span className={`px-2 py-0.5 text-xs font-medium rounded ${
+                              isSuccess 
+                                ? 'bg-green-100 text-green-700' 
+                                : 'bg-red-100 text-red-700'
+                            }`}>
+                              {isSuccess ? 'Success' : 'Error'}
+                            </span>
+                            {log.apikey_id && (
+                              <div className="flex items-center gap-1.5 px-2 py-0.5 bg-blue-50 border border-blue-200 rounded">
+                                <Key className="w-3 h-3 text-blue-600" />
+                                <span className="text-xs font-medium text-blue-700">
+                                  {apiKeyName}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-4 text-xs text-gray-600 mb-3">
+                            <div>
+                              <span className="font-medium">Time:</span>{' '}
+                              {formatDateTime(log.created_at)}
+                            </div>
+                            {metadata.duration !== undefined && (
+                              <div>
+                                <span className="font-medium">Duration:</span>{' '}
+                                {metadata.duration}ms
+                              </div>
+                            )}
+                            {metadata.responseSize !== undefined && (
+                              <div>
+                                <span className="font-medium">Response Size:</span>{' '}
+                                {(metadata.responseSize / 1024).toFixed(2)} KB
+                              </div>
+                            )}
+                            {log.apikey_id && (
+                              <div>
+                                <span className="font-medium">API Key:</span>{' '}
+                                <span className="text-gray-500">{apiKeyName}</span>
+                              </div>
+                            )}
+                            {origin.userAgent && (
+                              <div className="col-span-2">
+                                <span className="font-medium">User Agent:</span>{' '}
+                                <span className="text-gray-500">{origin.userAgent}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {metadata.args && Object.keys(metadata.args).length > 0 && (
+                            <div className="mb-3">
+                              <p className="text-xs font-medium text-gray-700 mb-1">Arguments:</p>
+                              <pre className="bg-gray-900 text-gray-100 p-2 rounded text-xs overflow-x-auto font-mono">
+                                {JSON.stringify(metadata.args, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+
+                          {metadata.error && (
+                            <div className="mb-3">
+                              <p className="text-xs font-medium text-red-700 mb-1">Error:</p>
+                              <div className="bg-red-100 border border-red-200 rounded p-2">
+                                <p className="text-xs text-red-800">{metadata.error}</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {origin.ip && (
+                            <div className="text-xs text-gray-500">
+                              <span className="font-medium">IP:</span> {origin.ip}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Generate Key Modal */}

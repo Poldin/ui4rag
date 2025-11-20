@@ -20,6 +20,42 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
 /**
+ * Salva un log delle chiamate MCP nel database
+ */
+async function saveMcpLog(
+  ragId: string | null,
+  metadata: {
+    method?: string;
+    tool?: string;
+    args?: any;
+    success?: boolean;
+    error?: string;
+    responseSize?: number;
+    duration?: number;
+  },
+  origin?: {
+    ip?: string;
+    userAgent?: string;
+    referer?: string;
+  },
+  apiKeyId?: string | null
+): Promise<void> {
+  try {
+    const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+    
+    await supabase.from('mcp_logs').insert({
+      rag_id: ragId,
+      apikey_id: apiKeyId || null,
+      metadata: metadata as any,
+      origin: origin as any,
+    });
+  } catch (error) {
+    // Non bloccare la richiesta se il logging fallisce
+    console.error('Failed to save MCP log:', error);
+  }
+}
+
+/**
  * Verifica che le variabili d'ambiente Supabase siano configurate
  * Usa solo la anon key per sicurezza (richiede policy RLS appropriate)
  */
@@ -48,6 +84,7 @@ async function validateApiKey(apiKey: string): Promise<{
   userId: string;
   ragId: string;
   ragConfig: any;
+  apiKeyId: string;
 } | null> {
   // Verifica variabili d'ambiente prima di creare il client
   const envCheck = validateSupabaseEnv();
@@ -132,6 +169,7 @@ async function validateApiKey(apiKey: string): Promise<{
     userId: matchedKey.user_id,
     ragId: matchedKey.rag_id,
     ragConfig: config,
+    apiKeyId: matchedKey.id,
   };
 }
 
@@ -670,15 +708,99 @@ export async function GET(request: NextRequest) {
       }
     );
 
+    // Estrai informazioni di origine dalla richiesta
+    const origin = {
+      ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || undefined,
+      userAgent: request.headers.get('user-agent') || undefined,
+      referer: request.headers.get('referer') || undefined,
+    };
+
     // Tools list
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: getToolsDefinition(),
-    }));
+    server.setRequestHandler(ListToolsRequestSchema, async () => {
+      const startTime = Date.now();
+      try {
+        const tools = getToolsDefinition();
+        const duration = Date.now() - startTime;
+        
+        // Salva log
+        await saveMcpLog(
+          authData.ragId,
+          {
+            method: 'tools/list',
+            success: true,
+            responseSize: JSON.stringify({ tools }).length,
+            duration,
+          },
+          origin,
+          authData.apiKeyId
+        );
+        
+        return { tools };
+      } catch (error: any) {
+        const duration = Date.now() - startTime;
+        
+        // Salva log errore
+        await saveMcpLog(
+          authData.ragId,
+          {
+            method: 'tools/list',
+            success: false,
+            error: error.message || 'Unknown error',
+            duration,
+          },
+          origin,
+          authData.apiKeyId
+        );
+        
+        throw error;
+      }
+    });
 
     // Implementazione tools
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
-      return executeTool(name, args, config);
+      const startTime = Date.now();
+      
+      try {
+        const result = await executeTool(name, args, config);
+        const duration = Date.now() - startTime;
+        
+        // Salva log successo
+        await saveMcpLog(
+          authData.ragId,
+          {
+            method: 'tools/call',
+            tool: name,
+            args: args || {},
+            success: true,
+            responseSize: JSON.stringify(result).length,
+            duration,
+          },
+          origin,
+          authData.apiKeyId
+        );
+        
+        return result;
+      } catch (error: any) {
+        const duration = Date.now() - startTime;
+        
+        // Salva log errore
+        await saveMcpLog(
+          authData.ragId,
+          {
+            method: 'tools/call',
+            tool: name,
+            args: args || {},
+            success: false,
+            error: error.message || 'Unknown error',
+            duration,
+          },
+          origin,
+          authData.apiKeyId
+        );
+        
+        throw error;
+      }
     });
 
     // Crea custom SSE transport per Next.js
@@ -890,22 +1012,60 @@ export async function POST(request: NextRequest) {
       id: jsonrpcRequest.id,
     });
 
+    // Estrai informazioni di origine dalla richiesta
+    const origin = {
+      ip: request.headers.get('x-forwarded-for') || request.headers.get('x-real-ip') || undefined,
+      userAgent: request.headers.get('user-agent') || undefined,
+      referer: request.headers.get('referer') || undefined,
+    };
+
     // Gestisci i metodi JSON-RPC
     try {
       switch (jsonrpcRequest.method) {
         case 'tools/list': {
+          const startTime = Date.now();
           try {
             const tools = getToolsDefinition();
             const response = createJSONRPCSuccessResponse(jsonrpcRequest.id, {
               tools,
             });
+            const duration = Date.now() - startTime;
             console.log('✅ HTTP Transport response: tools/list', { toolCount: tools.length });
+            
+            // Salva log
+            await saveMcpLog(
+              authData.ragId,
+              {
+                method: 'tools/list',
+                success: true,
+                responseSize: JSON.stringify(response).length,
+                duration,
+              },
+              origin,
+              authData.apiKeyId
+            );
+            
             return new Response(JSON.stringify(response), {
               status: 200,
               headers: { 'Content-Type': 'application/json' },
             });
           } catch (error: any) {
+            const duration = Date.now() - startTime;
             console.error('❌ Error in tools/list:', error);
+            
+            // Salva log errore
+            await saveMcpLog(
+              authData.ragId,
+              {
+                method: 'tools/list',
+                success: false,
+                error: error.message || 'Unknown error',
+                duration,
+              },
+              origin,
+              authData.apiKeyId
+            );
+            
             throw error;
           }
         }
@@ -924,6 +1084,7 @@ export async function POST(request: NextRequest) {
             throw new Error('Missing tool name in params');
           }
 
+          const startTime = Date.now();
           console.log('🔧 Executing tool:', name, { 
             args: args ? Object.keys(args) : [],
             ragId: authData.ragId 
@@ -958,25 +1119,60 @@ export async function POST(request: NextRequest) {
               resultData = resultText;
             }
 
+            const duration = Date.now() - startTime;
             const response = createJSONRPCSuccessResponse(jsonrpcRequest.id, resultData);
             console.log('✅ HTTP Transport response: tools/call', name, { 
               resultSize: JSON.stringify(resultData).length 
             });
+            
+            // Salva log successo
+            await saveMcpLog(
+              authData.ragId,
+              {
+                method: 'tools/call',
+                tool: name,
+                args: args || {},
+                success: true,
+                responseSize: JSON.stringify(resultData).length,
+                duration,
+              },
+              origin,
+              authData.apiKeyId
+            );
+            
             return new Response(JSON.stringify(response), {
               status: 200,
               headers: { 'Content-Type': 'application/json' },
             });
           } catch (toolError: any) {
+            const duration = Date.now() - startTime;
             console.error('❌ Error executing tool:', name, {
               error: toolError.message,
               stack: toolError.stack,
               name: toolError.name,
             });
+            
+            // Salva log errore
+            await saveMcpLog(
+              authData.ragId,
+              {
+                method: 'tools/call',
+                tool: name,
+                args: args || {},
+                success: false,
+                error: toolError.message || 'Unknown error',
+                duration,
+              },
+              origin,
+              authData.apiKeyId
+            );
+            
             throw toolError;
           }
         }
 
         case 'initialize': {
+          const startTime = Date.now();
           // MCP HTTP transport potrebbe richiedere initialize
           // Restituiamo capabilities del server
           const response = createJSONRPCSuccessResponse(jsonrpcRequest.id, {
@@ -989,7 +1185,22 @@ export async function POST(request: NextRequest) {
               version: '1.0.0',
             },
           });
+          const duration = Date.now() - startTime;
           console.log('✅ HTTP Transport response: initialize');
+          
+          // Salva log
+          await saveMcpLog(
+            authData.ragId,
+            {
+              method: 'initialize',
+              success: true,
+              responseSize: JSON.stringify(response).length,
+              duration,
+            },
+            origin,
+            authData.apiKeyId
+          );
+          
           return new Response(JSON.stringify(response), {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -1018,6 +1229,18 @@ export async function POST(request: NextRequest) {
         name: error.name,
         code: error.code,
       });
+
+      // Salva log errore
+      await saveMcpLog(
+        authData?.ragId || null,
+        {
+          method: jsonrpcRequest?.method,
+          success: false,
+          error: error.message || 'Unknown error',
+        },
+        origin,
+        authData?.apiKeyId || null
+      );
 
       // Se è un McpError, mappalo a JSON-RPC error
       if (error instanceof McpError) {
