@@ -17,7 +17,29 @@ import { createEmbeddingConfig } from '../../../lib/ai-sdk/embeddings';
 import { randomUUID } from 'node:crypto';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+/**
+ * Verifica che le variabili d'ambiente Supabase siano configurate
+ * Usa solo la anon key per sicurezza (richiede policy RLS appropriate)
+ */
+function validateSupabaseEnv(): { valid: boolean; error?: string } {
+  if (!supabaseUrl) {
+    return {
+      valid: false,
+      error: 'NEXT_PUBLIC_SUPABASE_URL environment variable is not set',
+    };
+  }
+  
+  if (!supabaseAnonKey) {
+    return {
+      valid: false,
+      error: 'NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable is not set. Please configure it in Vercel environment variables.',
+    };
+  }
+  
+  return { valid: true };
+}
 
 /**
  * Valida l'API key e ritorna i dati del RAG associato
@@ -27,7 +49,15 @@ async function validateApiKey(apiKey: string): Promise<{
   ragId: string;
   ragConfig: any;
 } | null> {
-  const supabase = createClient<Database>(supabaseUrl, supabaseServiceKey);
+  // Verifica variabili d'ambiente prima di creare il client
+  const envCheck = validateSupabaseEnv();
+  if (!envCheck.valid) {
+    console.error('❌ Supabase environment variables not configured:', envCheck.error);
+    throw new Error(envCheck.error);
+  }
+
+  // Usa solo anon key per sicurezza (richiede policy RLS appropriate)
+  const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
 
   // Recupera tutte le API keys attive
   const { data: keys, error } = await supabase
@@ -593,6 +623,19 @@ export async function GET(request: NextRequest) {
 
     const apiKey = authHeader.substring(7); // Rimuovi "Bearer "
 
+    // Verifica variabili d'ambiente Supabase prima di procedere
+    const envCheck = validateSupabaseEnv();
+    if (!envCheck.valid) {
+      console.error('❌ Supabase environment variables not configured:', envCheck.error);
+      return new Response(
+        JSON.stringify({ error: `Server configuration error: ${envCheck.error}` }),
+        {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
     // Valida API key
     const authData = await validateApiKey(apiKey);
     if (!authData) {
@@ -718,6 +761,21 @@ export async function POST(request: NextRequest) {
     }
 
     const apiKey = authHeader.substring(7); // Rimuovi "Bearer "
+
+    // Verifica variabili d'ambiente Supabase prima di procedere
+    const envCheck = validateSupabaseEnv();
+    if (!envCheck.valid) {
+      const errorResponse = createJSONRPCErrorResponse(
+        null,
+        -32603,
+        `Server configuration error: ${envCheck.error}. Please contact the administrator.`
+      );
+      console.error('❌ Supabase environment variables not configured:', envCheck.error);
+      return new Response(JSON.stringify(errorResponse), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
     // Valida API key
     const authData = await validateApiKey(apiKey);
