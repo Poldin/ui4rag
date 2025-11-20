@@ -181,141 +181,263 @@ export default function SearchCarousel() {
   const selectedResult = selectedResultIndex !== null ? currentCard.results[selectedResultIndex] : null;
 
   return (
-    <div className="relative overflow-hidden flex" style={{ minHeight: '450px' }}>
-      {/* Main Content */}
-      <div 
-        className={`transition-all duration-500 ${isAnimating ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}
-        style={{ 
-          width: showSidebar ? `calc(100% - ${sidebarWidth}px - 8px)` : '100%',
-          paddingRight: showSidebar ? '8px' : '0px'
-        }}
-      >
-        {/* Search Bar */}
-        <div className="mb-6 relative">
-          <div className="absolute left-4 top-1/2 -translate-y-1/2">
-            <Search className="w-5 h-5 text-gray-400" />
-          </div>
-          <div className="pl-12 pr-4 py-3.5 bg-white border-2 border-gray-300 rounded-xl shadow-sm">
-            <p className="text-sm text-gray-900 font-medium">{currentCard.query}</p>
-          </div>
-          <div className="absolute right-3 top-1/2 -translate-y-1/2">
-            <Sparkles className="w-5 h-5 text-purple-500 animate-pulse" />
-          </div>
-        </div>
-
-        {/* Results */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs text-gray-600">
-              <span className="font-semibold text-gray-900">{currentCard.results.length}</span> relevant results found
-            </p>
-            <div className="flex gap-1.5">
-              {searchExamples.map((_, idx) => (
-                <div
-                  key={idx}
-                  className={`h-1.5 rounded-full transition-all duration-300 ${
-                    idx === currentIndex 
-                      ? 'w-6 bg-gray-900' 
-                      : 'w-1.5 bg-gray-300'
-                  }`}
-                />
-              ))}
+    <div className="relative overflow-hidden">
+      {/* Desktop Layout */}
+      <div className="hidden md:flex relative" style={{ height: '580px' }}>
+        {/* Main Content */}
+        <div 
+          className={`transition-all duration-500 ${isAnimating ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}
+          style={{ 
+            width: showSidebar ? `calc(100% - ${sidebarWidth}px - 8px)` : '100%',
+            paddingRight: showSidebar ? '8px' : '0px'
+          }}
+        >
+          {/* Search Bar */}
+          <div className="mb-6 relative">
+            <div className="absolute left-4 top-1/2 -translate-y-1/2">
+              <Search className="w-5 h-5 text-gray-400" />
+            </div>
+            <div className="pl-12 pr-4 py-3.5 bg-white border-2 border-gray-300 rounded-xl shadow-sm">
+              <p className="text-sm text-gray-900 font-medium">{currentCard.query}</p>
+            </div>
+            <div className="absolute right-3 top-1/2 -translate-y-1/2">
+              <Sparkles className="w-5 h-5 text-purple-500 animate-pulse" />
             </div>
           </div>
 
-          {currentCard.results.map((result, idx) => (
-            <div
-              key={idx}
-              className={`bg-white border rounded-lg p-4 transition-all cursor-pointer group ${
-                selectedResultIndex === idx
-                  ? 'border-blue-400 shadow-md ring-2 ring-blue-100'
-                  : 'border-gray-200 hover:shadow-md hover:border-gray-300'
-              }`}
-              style={{
-                animationDelay: `${idx * 100}ms`
-              }}
-            >
-              <div className="flex items-start justify-between mb-2">
-                <h4 className="text-sm font-semibold text-gray-900">{result.title}</h4>
-                <div className="flex items-center gap-2 shrink-0 ml-3">
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${getSourceColor(result.source)}`}>
-                    {result.source}
+          {/* Results */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-gray-600">
+                <span className="font-semibold text-gray-900">{currentCard.results.length}</span> relevant results found
+              </p>
+              <div className="flex gap-1.5">
+                {searchExamples.map((_, idx) => (
+                  <div
+                    key={idx}
+                    className={`h-1.5 rounded-full transition-all duration-300 ${
+                      idx === currentIndex 
+                        ? 'w-6 bg-gray-900' 
+                        : 'w-1.5 bg-gray-300'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {currentCard.results.map((result, idx) => (
+              <div
+                key={idx}
+                className={`bg-white border rounded-lg p-4 transition-all cursor-pointer group ${
+                  selectedResultIndex === idx
+                    ? 'border-blue-400 shadow-md ring-2 ring-blue-100'
+                    : 'border-gray-200 hover:shadow-md hover:border-gray-300'
+                }`}
+                style={{
+                  animationDelay: `${idx * 100}ms`
+                }}
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <h4 className="text-sm font-semibold text-gray-900">{result.title}</h4>
+                  <div className="flex items-center gap-2 shrink-0 ml-3">
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${getSourceColor(result.source)}`}>
+                      {result.source}
+                    </span>
+                    <span className="text-xs font-medium text-green-600">
+                      {result.similarity.toFixed(1)}%
+                    </span>
+                    <ChevronRight className={`w-4 h-4 transition-colors ${
+                      selectedResultIndex === idx ? 'text-blue-600' : 'text-gray-400 group-hover:text-gray-600'
+                    }`} />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-600 leading-relaxed line-clamp-2">
+                  {result.preview}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Desktop Sidebar */}
+        {selectedResult && (
+          <div
+            className={`absolute right-0 top-0 h-full bg-white border-l border-gray-200 shadow-xl flex flex-col transition-all duration-500 ${
+              showSidebar ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
+            }`}
+            style={{ width: `${sidebarWidth}px` }}
+          >
+            {/* Sidebar Header */}
+            <div className="border-b border-gray-200 px-4 py-3 flex items-start justify-between bg-gray-50">
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-semibold text-gray-900 mb-1">
+                  {selectedResult.title}
+                </h3>
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${getSourceColor(selectedResult.source)}`}>
+                    {selectedResult.source}
                   </span>
-                  <span className="text-xs font-medium text-green-600">
-                    {result.similarity.toFixed(1)}%
+                  <span className="text-xs text-gray-500">
+                    {selectedResult.similarity.toFixed(1)}% match
                   </span>
-                  <ChevronRight className={`w-4 h-4 transition-colors ${
-                    selectedResultIndex === idx ? 'text-blue-600' : 'text-gray-400 group-hover:text-gray-600'
-                  }`} />
                 </div>
               </div>
-              <p className="text-xs text-gray-600 leading-relaxed line-clamp-2">
-                {result.preview}
-              </p>
+              <button className="ml-2 text-gray-400 hover:text-gray-600 transition-colors shrink-0">
+                <X className="w-4 h-4" />
+              </button>
             </div>
-          ))}
-        </div>
-      </div>
 
-      {/* Sidebar */}
-      {selectedResult && (
-        <div
-          className={`absolute right-0 top-0 h-full bg-white border-l border-gray-200 shadow-xl flex flex-col transition-all duration-500 ${
-            showSidebar ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
-          }`}
-          style={{ width: `${sidebarWidth}px` }}
-        >
-          {/* Sidebar Header */}
-          <div className="border-b border-gray-200 px-4 py-3 flex items-start justify-between bg-gray-50">
-            <div className="flex-1 min-w-0">
-              <h3 className="text-sm font-semibold text-gray-900 mb-1">
-                {selectedResult.title}
-              </h3>
-              <div className="flex items-center gap-2">
-                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${getSourceColor(selectedResult.source)}`}>
-                  {selectedResult.source}
-                </span>
-                <span className="text-xs text-gray-500">
-                  {selectedResult.similarity.toFixed(1)}% match
-                </span>
-              </div>
-            </div>
-            <button className="ml-2 text-gray-400 hover:text-gray-600 transition-colors shrink-0">
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+            {/* Sidebar Content */}
+            <div className="flex-1 overflow-y-auto px-4 py-4">
+              <div className="space-y-4">
+                {/* Info Box */}
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-xs text-blue-800 font-medium mb-1">
+                    Full Source Content
+                  </p>
+                  <p className="text-xs text-blue-700">
+                    This is the complete content from the matched source. The AI uses this context to generate accurate responses.
+                  </p>
+                </div>
 
-          {/* Sidebar Content */}
-          <div className="flex-1 overflow-y-auto px-4 py-4">
-            <div className="space-y-4">
-              {/* Info Box */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                <p className="text-xs text-blue-800 font-medium mb-1">
-                  Full Source Content
-                </p>
-                <p className="text-xs text-blue-700">
-                  This is the complete content from the matched source. The AI uses this context to generate accurate responses.
-                </p>
-              </div>
-
-              {/* Full Content */}
-              <div>
-                <h4 className="text-xs font-semibold text-gray-900 mb-2 uppercase tracking-wide">
-                  Content
-                </h4>
-                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                  <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
-                    <mark className="bg-yellow-100 px-1">
-                      {selectedResult.preview}
-                    </mark>
-                    {selectedResult.fullContent.replace(selectedResult.preview, '')}
+                {/* Full Content */}
+                <div>
+                  <h4 className="text-xs font-semibold text-gray-900 mb-2 uppercase tracking-wide">
+                    Content
+                  </h4>
+                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <div className="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">
+                      <mark className="bg-yellow-100 px-1">
+                        {selectedResult.preview}
+                      </mark>
+                      {selectedResult.fullContent.replace(selectedResult.preview, '')}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
+        )}
+      </div>
+
+      {/* Mobile Layout */}
+      <div className="md:hidden" style={{ minHeight: '500px' }}>
+        <div className={`transition-all duration-500 ${isAnimating ? 'opacity-0 scale-95' : 'opacity-100 scale-100'}`}>
+          {/* Search Bar */}
+          <div className="mb-4 relative">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2">
+              <Search className="w-4 h-4 text-gray-400" />
+            </div>
+            <div className="pl-10 pr-3 py-2.5 bg-white border-2 border-gray-300 rounded-lg shadow-sm">
+              <p className="text-xs text-gray-900 font-medium leading-snug">{currentCard.query}</p>
+            </div>
+            <div className="absolute right-2 top-1/2 -translate-y-1/2">
+              <Sparkles className="w-4 h-4 text-purple-500 animate-pulse" />
+            </div>
+          </div>
+
+          {/* Results */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-gray-600">
+                <span className="font-semibold text-gray-900">{currentCard.results.length}</span> results
+              </p>
+              <div className="flex gap-1">
+                {searchExamples.map((_, idx) => (
+                  <div
+                    key={idx}
+                    className={`h-1 rounded-full transition-all duration-300 ${
+                      idx === currentIndex 
+                        ? 'w-4 bg-gray-900' 
+                        : 'w-1 bg-gray-300'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {currentCard.results.map((result, idx) => (
+              <div
+                key={idx}
+                className={`bg-white border rounded-lg p-3 transition-all ${
+                  selectedResultIndex === idx
+                    ? 'border-blue-400 shadow-md ring-2 ring-blue-100'
+                    : 'border-gray-200'
+                }`}
+              >
+                <div className="flex items-start justify-between mb-1.5">
+                  <h4 className="text-xs font-semibold text-gray-900 flex-1 pr-2">{result.title}</h4>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${getSourceColor(result.source)}`}>
+                      {result.source}
+                    </span>
+                    <span className="text-[10px] font-medium text-green-600">
+                      {result.similarity.toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-gray-600 leading-relaxed line-clamp-2">
+                  {result.preview}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {/* Mobile Expanded Content */}
+          {selectedResult && showSidebar && (
+            <div className="mt-4 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+              {/* Header */}
+              <div className="border-b border-gray-200 px-3 py-2.5 bg-gray-50">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-xs font-semibold text-gray-900 mb-1">
+                      {selectedResult.title}
+                    </h3>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${getSourceColor(selectedResult.source)}`}>
+                        {selectedResult.source}
+                      </span>
+                      <span className="text-[10px] text-gray-500">
+                        {selectedResult.similarity.toFixed(1)}% match
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Content */}
+              <div className="px-3 py-3 max-h-64 overflow-y-auto">
+                <div className="space-y-3">
+                  {/* Info Box */}
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-2">
+                    <p className="text-[10px] text-blue-800 font-medium mb-1">
+                      Full Source Content
+                    </p>
+                    <p className="text-[10px] text-blue-700 leading-relaxed">
+                      This is the complete content from the matched source. The AI uses this context to generate accurate responses.
+                    </p>
+                  </div>
+
+                  {/* Full Content */}
+                  <div>
+                    <h4 className="text-[10px] font-semibold text-gray-900 mb-1.5 uppercase tracking-wide">
+                      Content
+                    </h4>
+                    <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
+                      <div className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">
+                        <mark className="bg-yellow-100 px-1">
+                          {selectedResult.preview}
+                        </mark>
+                        {selectedResult.fullContent.replace(selectedResult.preview, '')}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

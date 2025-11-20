@@ -94,7 +94,7 @@ export default function TrainingDemo() {
   };
 
   return (
-    <div className="w-full max-w-md mx-auto">
+    <div className="w-full max-w-md mx-auto" style={{ minHeight: '400px' }}>
       {!isExpanded ? (
         // Collapsed Badge
         <button
@@ -106,7 +106,7 @@ export default function TrainingDemo() {
         </button>
       ) : (
         // Expanded Panel
-        <div className="bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden">
+        <div className="bg-white border border-gray-200 rounded-lg shadow-xl overflow-hidden" style={{ minHeight: '400px' }}>
           {/* Header */}
           <div className="bg-gray-900 border-b border-gray-800 px-4 py-3">
             <div className="flex items-center justify-between">

@@ -304,41 +304,123 @@ export default function AgentRagDiagram() {
 
   return (
     <div className="relative max-w-5xl mx-auto">
-      <div style={{ height: "580px" }} className="overflow-hidden bg-white rounded-2xl">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          nodeTypes={nodeTypes}
-          fitView
-          fitViewOptions={{ padding: 0.15 }}
-          proOptions={{ hideAttribution: true }}
-          nodesDraggable={false}
-          nodesConnectable={false}
-          elementsSelectable={false}
-          zoomOnScroll={false}
-          panOnDrag={false}
-          zoomOnPinch={false}
-          zoomOnDoubleClick={false}
-        >
-          <Background color="#d1d5db" gap={20} size={1} />
-        </ReactFlow>
+      {/* Desktop Version */}
+      <div className="hidden md:block">
+        <div style={{ height: "580px" }} className="overflow-hidden bg-white rounded-2xl">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            nodeTypes={nodeTypes}
+            fitView
+            fitViewOptions={{ padding: 0.15 }}
+            proOptions={{ hideAttribution: true }}
+            nodesDraggable={false}
+            nodesConnectable={false}
+            elementsSelectable={false}
+            zoomOnScroll={false}
+            panOnDrag={false}
+            zoomOnPinch={false}
+            zoomOnDoubleClick={false}
+          >
+            <Background color="#d1d5db" gap={20} size={1} />
+          </ReactFlow>
+        </div>
+
+        {/* Info Badges Outside */}
+        <div className="flex items-center justify-center gap-4 mt-8">
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-md">
+            <div className="w-2 h-2 rounded-full bg-gray-900"></div>
+            <span className="text-sm font-semibold text-gray-900">Reliable Results</span>
+          </div>
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg shadow-md">
+            <Cpu className="w-4 h-4" />
+            <span className="text-sm font-semibold">MCP + API Ready</span>
+          </div>
+          <div className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-md">
+            <Zap className="w-4 h-4 text-gray-900" />
+            <span className="text-sm font-semibold text-gray-900">Fast Responses</span>
+          </div>
+        </div>
       </div>
 
-      {/* Info Badges Outside */}
-      <div className="flex items-center justify-center gap-4 mt-8">
-        <div className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-md">
-          <div className="w-2 h-2 rounded-full bg-gray-900"></div>
-          <span className="text-sm font-semibold text-gray-900">Reliable Results</span>
-        </div>
-        <div className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white rounded-lg shadow-md">
-          <Cpu className="w-4 h-4" />
-          <span className="text-sm font-semibold">MCP + API Ready</span>
-        </div>
-        <div className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg shadow-md">
-          <Zap className="w-4 h-4 text-gray-900" />
-          <span className="text-sm font-semibold text-gray-900">Fast Responses</span>
+      {/* Mobile Version */}
+      <div className="md:hidden" style={{ minHeight: '500px' }}>
+        <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4" style={{ minHeight: '500px' }}>
+          {/* Agent Node */}
+          <div className="flex flex-col items-center mb-6">
+            <div className="relative w-20 h-20 rounded-full bg-gray-900 flex items-center justify-center shadow-xl border-4 border-white mb-3">
+              <div className="absolute inset-2 rounded-full bg-white/10 backdrop-blur-sm"></div>
+              <Sparkles className="w-8 h-8 text-white relative z-10" />
+            </div>
+            <span className="text-sm font-bold text-gray-900">AI Agent</span>
+          </div>
+
+          {/* RAG Nodes */}
+          <div className="space-y-3">
+            {[
+              { id: "rag1", label: "User Docs RAG", protocol: "MCP", icon: Database, isActive: activeRag === 0 },
+              { id: "rag2", label: "Product KB RAG", protocol: "API", icon: Search, isActive: activeRag === 1 },
+              { id: "rag3", label: "Support RAG", protocol: "MCP", icon: MessageSquare, isActive: activeRag === 2 },
+            ].map((rag, idx) => {
+              const RagIcon = rag.icon;
+              return (
+                <div
+                  key={rag.id}
+                  className={`bg-white border-2 rounded-lg p-3 transition-all ${
+                    rag.isActive
+                      ? "border-gray-900 ring-2 ring-gray-200 shadow-md"
+                      : "border-gray-200"
+                  }`}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                      rag.isActive ? "bg-gray-900" : "bg-gray-100"
+                    }`}>
+                      <RagIcon className={`w-4 h-4 ${rag.isActive ? "text-white" : "text-gray-600"}`} />
+                    </div>
+                    {rag.isActive && (
+                      <div className="flex items-center gap-1 text-xs text-gray-900 font-bold">
+                        <div className="w-1.5 h-1.5 rounded-full bg-gray-900 animate-pulse"></div>
+                        ACTIVE
+                      </div>
+                    )}
+                  </div>
+                  <h4 className="text-xs font-bold text-gray-900 mb-1.5">{rag.label}</h4>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] px-2 py-0.5 bg-gray-900 text-white rounded font-mono font-bold">
+                      {rag.protocol}
+                    </span>
+                    <span className="text-[10px] text-gray-600 font-semibold">Gimme_RAG</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Connection Indicator */}
+          <div className="flex items-center justify-center gap-2 pt-2 border-t border-gray-200">
+            <div className="flex-1 h-0.5 bg-gray-300"></div>
+            <div className="w-2 h-2 rounded-full bg-gray-900 animate-pulse"></div>
+            <div className="flex-1 h-0.5 bg-gray-300"></div>
+          </div>
+
+          {/* Info Badges */}
+          <div className="flex flex-col gap-2 pt-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-lg shadow-sm justify-center">
+              <div className="w-1.5 h-1.5 rounded-full bg-gray-900"></div>
+              <span className="text-xs font-semibold text-gray-900">Reliable Results</span>
+            </div>
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-900 text-white rounded-lg shadow-sm justify-center">
+              <Cpu className="w-3.5 h-3.5" />
+              <span className="text-xs font-semibold">MCP + API Ready</span>
+            </div>
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-lg shadow-sm justify-center">
+              <Zap className="w-3.5 h-3.5 text-gray-900" />
+              <span className="text-xs font-semibold text-gray-900">Fast Responses</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
