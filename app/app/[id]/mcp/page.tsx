@@ -194,6 +194,43 @@ export default function MCPPage() {
 - **Content-Type:** \`application/json\`
 - **Authorization:** \`Bearer YOUR_API_KEY\`
 
+**Note:** The server supports both SSE (for Claude Desktop) and HTTP transport. For HTTP transport, use POST with JSON-RPC 2.0 format.
+
+---
+
+## Available Methods
+
+### tools/list
+
+Lists all available tools.
+
+**Request:**
+\`\`\`json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list"
+}
+\`\`\`
+
+**Response:**
+\`\`\`json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "tools": [
+      {
+        "name": "search_docs_rag",
+        "description": "Semantic search using vector embeddings (RAG)...",
+        "inputSchema": {...}
+      },
+      ...
+    ]
+  }
+}
+\`\`\`
+
 ---
 
 ## Available Tools
@@ -225,20 +262,24 @@ export default function MCPPage() {
 **Response:**
 \`\`\`json
 {
-  "query": "database configuration",
-  "count": 3,
-  "results": [
-    {
-      "sourceId": "uuid",
-      "sourceTitle": "Setup Guide",
-      "sourceType": "docs",
-      "content": "To configure the database...",
-      "similarity": 94.5,
-      "chunkIndex": 0,
-      "chunkTotal": 10,
-      "metadata": {...}
-    }
-  ]
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "query": "database configuration",
+    "count": 3,
+    "results": [
+      {
+        "sourceId": "uuid",
+        "sourceTitle": "Setup Guide",
+        "sourceType": "docs",
+        "content": "To configure the database...",
+        "similarity": 94.5,
+        "chunkIndex": 0,
+        "chunkTotal": 10,
+        "metadata": {...}
+      }
+    ]
+  }
 }
 \`\`\`
 
@@ -275,21 +316,25 @@ export default function MCPPage() {
 **Response:**
 \`\`\`json
 {
-  "query": "API endpoint configuration",
-  "count": 12,
-  "matches": [
-    {
-      "sourceId": "uuid",
-      "sourceTitle": "Setup Guide",
-      "matchPosition": 245,
-      "matchLine": 12,
-      "context": "...full context with highlighted match...",
-      "beforeContext": "Previous lines...",
-      "matchText": "API endpoint configuration",
-      "afterContext": "Following lines...",
-      "rank": 0.95
-    }
-  ]
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "query": "API endpoint configuration",
+    "count": 12,
+    "matches": [
+      {
+        "sourceId": "uuid",
+        "sourceTitle": "Setup Guide",
+        "matchPosition": 245,
+        "matchLine": 12,
+        "context": "...full context with highlighted match...",
+        "beforeContext": "Previous lines...",
+        "matchText": "API endpoint configuration",
+        "afterContext": "Following lines...",
+        "rank": 0.95
+      }
+    ]
+  }
 }
 \`\`\`
 
@@ -320,24 +365,28 @@ export default function MCPPage() {
 **Response:**
 \`\`\`json
 {
-  "source": {
-    "id": "uuid",
-    "title": "Setup Guide",
-    "sourceType": "docs",
-    "content": "Full document content...",
-    "metadata": {...},
-    "createdAt": "2024-01-01T00:00:00Z",
-    "updatedAt": "2024-01-01T00:00:00Z"
-  },
-  "chunks": [
-    {
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "source": {
       "id": "uuid",
-      "content": "Chunk content...",
-      "chunkIndex": 0,
-      "chunkTotal": 10,
-      "metadata": {...}
-    }
-  ]
+      "title": "Setup Guide",
+      "sourceType": "docs",
+      "content": "Full document content...",
+      "metadata": {...},
+      "createdAt": "2024-01-01T00:00:00Z",
+      "updatedAt": "2024-01-01T00:00:00Z"
+    },
+    "chunks": [
+      {
+        "id": "uuid",
+        "content": "Chunk content...",
+        "chunkIndex": 0,
+        "chunkTotal": 10,
+        "metadata": {...}
+      }
+    ]
+  }
 }
 \`\`\`
 
@@ -370,23 +419,27 @@ export default function MCPPage() {
 **Response:**
 \`\`\`json
 {
-  "count": 42,
-  "sources": [
-    {
-      "id": "uuid",
-      "title": "Setup Guide",
-      "sourceType": "docs",
-      "metadata": {...},
-      "createdAt": "2024-01-01T00:00:00Z"
-    },
-    {
-      "id": "uuid",
-      "title": "API Reference",
-      "sourceType": "docs",
-      "metadata": {...},
-      "createdAt": "2024-01-02T00:00:00Z"
-    }
-  ]
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+    "count": 42,
+    "sources": [
+      {
+        "id": "uuid",
+        "title": "Setup Guide",
+        "sourceType": "docs",
+        "metadata": {...},
+        "createdAt": "2024-01-01T00:00:00Z"
+      },
+      {
+        "id": "uuid",
+        "title": "API Reference",
+        "sourceType": "docs",
+        "metadata": {...},
+        "createdAt": "2024-01-02T00:00:00Z"
+      }
+    ]
+  }
 }
 \`\`\`
 
@@ -415,21 +468,50 @@ export default function MCPPage() {
 **Response:**
 \`\`\`json
 {
-  "totalSources": 42,
-  "totalChunks": 538,
-  "chunksWithEmbeddings": 538,
-  "chunksWithoutEmbeddings": 0
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+    "totalSources": 42,
+    "totalChunks": 538,
+    "chunksWithEmbeddings": 538,
+    "chunksWithoutEmbeddings": 0
+  }
 }
 \`\`\`
 
 ---
 
+## Error Responses
+
+If an error occurs, the server returns a JSON-RPC error response:
+
+\`\`\`json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": {
+    "code": -32602,
+    "message": "Invalid params"
+  }
+}
+\`\`\`
+
+**Common Error Codes:**
+- \`-32700\` - Parse error (Invalid JSON)
+- \`-32600\` - Invalid Request
+- \`-32601\` - Method not found
+- \`-32602\` - Invalid params
+- \`-32603\` - Internal error
+- \`-32000\` - Server error (authentication, config, etc.)
+
 ## Usage Notes
 
 1. Replace \`YOUR_API_KEY\` with your actual API key from the dashboard
 2. All requests use JSON-RPC 2.0 protocol
-3. The \`id\` field in requests can be any unique identifier
-4. All responses follow the JSON-RPC 2.0 response format
+3. The \`id\` field in requests can be any unique identifier (string, number, or null)
+4. All responses follow the JSON-RPC 2.0 response format with \`jsonrpc\`, \`id\`, and \`result\` or \`error\` fields
+5. For HTTP transport, use POST method with \`Content-Type: application/json\`
+6. For SSE transport (Claude Desktop), use GET method with \`Accept: text/event-stream\`
 `;
   };
 
@@ -635,7 +717,55 @@ export default function MCPPage() {
 
             {/* Tools Documentation */}
             <div className="space-y-3">
-              <h3 className="text-sm font-medium text-gray-900">Available Tools</h3>
+              <h3 className="text-sm font-medium text-gray-900">Available Methods</h3>
+
+              {/* Method: tools/list */}
+              <div className="border border-gray-200 rounded-lg overflow-hidden">
+                <div className="bg-gray-50 px-4 py-2.5 border-b border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <code className="text-sm font-semibold text-gray-900">tools/list</code>
+                    <span className="text-xs text-gray-600">List All Tools</span>
+                  </div>
+                </div>
+                <div className="p-4 space-y-3">
+                  <p className="text-xs text-gray-700">
+                    Lists all available tools with their descriptions and input schemas.
+                  </p>
+                  
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1.5">Request:</p>
+                    <pre className="bg-gray-900 text-gray-100 p-3 rounded-md text-xs overflow-x-auto font-mono">
+{`{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list"
+}`}
+                    </pre>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 mb-1.5">Response:</p>
+                    <pre className="bg-gray-900 text-gray-100 p-3 rounded-md text-xs overflow-x-auto font-mono">
+{`{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "tools": [
+      {
+        "name": "search_docs_rag",
+        "description": "Semantic search using vector embeddings...",
+        "inputSchema": {...}
+      },
+      ...
+    ]
+  }
+}`}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+
+              <h3 className="text-sm font-medium text-gray-900 mt-6">Available Tools</h3>
 
               {/* Tool 1: search_docs_rag */}
               <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -691,20 +821,24 @@ export default function MCPPage() {
                     <p className="text-xs font-medium text-gray-700 mb-1.5">Response:</p>
                     <pre className="bg-gray-900 text-gray-100 p-3 rounded-md text-xs overflow-x-auto font-mono">
 {`{
-  "query": "database configuration",
-  "count": 3,
-  "results": [
-    {
-      "sourceId": "uuid",
-      "sourceTitle": "Setup Guide",
-      "sourceType": "docs",
-      "content": "To configure the database...",
-      "similarity": 94.5,
-      "chunkIndex": 0,
-      "chunkTotal": 10,
-      "metadata": {...}
-    }
-  ]
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "query": "database configuration",
+    "count": 3,
+    "results": [
+      {
+        "sourceId": "uuid",
+        "sourceTitle": "Setup Guide",
+        "sourceType": "docs",
+        "content": "To configure the database...",
+        "similarity": 94.5,
+        "chunkIndex": 0,
+        "chunkTotal": 10,
+        "metadata": {...}
+      }
+    ]
+  }
 }`}
                     </pre>
                   </div>
@@ -777,21 +911,25 @@ export default function MCPPage() {
                     <p className="text-xs font-medium text-gray-700 mb-1.5">Response:</p>
                     <pre className="bg-gray-900 text-gray-100 p-3 rounded-md text-xs overflow-x-auto font-mono">
 {`{
-  "query": "API endpoint configuration",
-  "count": 12,
-  "matches": [
-    {
-      "sourceId": "uuid",
-      "sourceTitle": "Setup Guide",
-      "chunkId": "uuid",
-      "matchPosition": 245,
-      "context": "Full context with match...",
-      "beforeContext": "Lines before match...",
-      "matchText": "API endpoint configuration",
-      "afterContext": "Lines after match...",
-      "rank": 0.95
-    }
-  ]
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "query": "API endpoint configuration",
+    "count": 12,
+    "matches": [
+      {
+        "sourceId": "uuid",
+        "sourceTitle": "Setup Guide",
+        "chunkId": "uuid",
+        "matchPosition": 245,
+        "context": "Full context with match...",
+        "beforeContext": "Lines before match...",
+        "matchText": "API endpoint configuration",
+        "afterContext": "Lines after match...",
+        "rank": 0.95
+      }
+    ]
+  }
 }`}
                     </pre>
                   </div>
@@ -843,24 +981,28 @@ export default function MCPPage() {
                     <p className="text-xs font-medium text-gray-700 mb-1.5">Response:</p>
                     <pre className="bg-gray-900 text-gray-100 p-3 rounded-md text-xs overflow-x-auto font-mono">
 {`{
-  "source": {
-    "id": "uuid",
-    "title": "Setup Guide",
-    "sourceType": "docs",
-    "content": "Full document content...",
-    "metadata": {...},
-    "createdAt": "2024-01-01T00:00:00Z",
-    "updatedAt": "2024-01-01T00:00:00Z"
-  },
-  "chunks": [
-    {
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "source": {
       "id": "uuid",
-      "content": "Chunk content...",
-      "chunkIndex": 0,
-      "chunkTotal": 10,
-      "metadata": {...}
-    }
-  ]
+      "title": "Setup Guide",
+      "sourceType": "docs",
+      "content": "Full document content...",
+      "metadata": {...},
+      "createdAt": "2024-01-01T00:00:00Z",
+      "updatedAt": "2024-01-01T00:00:00Z"
+    },
+    "chunks": [
+      {
+        "id": "uuid",
+        "content": "Chunk content...",
+        "chunkIndex": 0,
+        "chunkTotal": 10,
+        "metadata": {...}
+      }
+    ]
+  }
 }`}
                     </pre>
                   </div>
@@ -918,23 +1060,27 @@ export default function MCPPage() {
                     <p className="text-xs font-medium text-gray-700 mb-1.5">Response:</p>
                     <pre className="bg-gray-900 text-gray-100 p-3 rounded-md text-xs overflow-x-auto font-mono">
 {`{
-  "count": 42,
-  "sources": [
-    {
-      "id": "uuid",
-      "title": "Setup Guide",
-      "sourceType": "docs",
-      "metadata": {...},
-      "createdAt": "2024-01-01T00:00:00Z"
-    },
-    {
-      "id": "uuid",
-      "title": "API Reference",
-      "sourceType": "docs",
-      "metadata": {...},
-      "createdAt": "2024-01-02T00:00:00Z"
-    }
-  ]
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+    "count": 42,
+    "sources": [
+      {
+        "id": "uuid",
+        "title": "Setup Guide",
+        "sourceType": "docs",
+        "metadata": {...},
+        "createdAt": "2024-01-01T00:00:00Z"
+      },
+      {
+        "id": "uuid",
+        "title": "API Reference",
+        "sourceType": "docs",
+        "metadata": {...},
+        "createdAt": "2024-01-02T00:00:00Z"
+      }
+    ]
+  }
 }`}
                     </pre>
                   </div>
@@ -980,10 +1126,14 @@ export default function MCPPage() {
                     <p className="text-xs font-medium text-gray-700 mb-1.5">Response:</p>
                     <pre className="bg-gray-900 text-gray-100 p-3 rounded-md text-xs overflow-x-auto font-mono">
 {`{
-  "totalSources": 42,
-  "totalChunks": 538,
-  "chunksWithEmbeddings": 538,
-  "chunksWithoutEmbeddings": 0
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+    "totalSources": 42,
+    "totalChunks": 538,
+    "chunksWithEmbeddings": 538,
+    "chunksWithoutEmbeddings": 0
+  }
 }`}
                     </pre>
                   </div>

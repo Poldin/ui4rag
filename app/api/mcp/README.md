@@ -20,9 +20,11 @@ Questo folder contiene l'implementazione del **Model Context Protocol (MCP) serv
 
 ### 1. MCP Server (Main)
 
-**`GET /api/mcp`**
+Il server supporta **due tipi di transport**:
 
-Server MCP con transport SSE per connessione da Claude Desktop.
+#### A. SSE Transport (Server-Sent Events)
+
+**`GET /api/mcp`** - Per connessioni da Claude Desktop
 
 **Headers:**
 ```
@@ -34,8 +36,73 @@ Accept: text/event-stream
 - Content-Type: `text/event-stream`
 - SSE stream con protocollo MCP JSON-RPC
 
+#### B. HTTP Transport (JSON-RPC 2.0)
+
+**`POST /api/mcp`** - Per integrazioni HTTP standard
+
+**Headers:**
+```
+Authorization: Bearer mcp_xxxxxxxxxxxxxxxxxxxxx
+Content-Type: application/json
+```
+
+**Request Format (JSON-RPC 2.0):**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/list"
+}
+```
+
+o per chiamare un tool:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "search_docs_rag",
+    "arguments": {
+      "query": "database configuration",
+      "limit": 5
+    }
+  }
+}
+```
+
+**Response Format:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "tools": [...]
+  }
+}
+```
+
+**Error Response:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": {
+    "code": -32602,
+    "message": "Invalid params"
+  }
+}
+```
+
+**Metodi disponibili:**
+- `tools/list` - Lista tutti i tools disponibili
+- `tools/call` - Esegue un tool specifico
+- `initialize` - Handshake iniziale (opzionale)
+
 **Tools disponibili:**
-- `search_docs` - Semantic search
+- `search_docs_rag` - Semantic search con embeddings (RAG)
+- `search_docs_keyword` - Ricerca keyword avanzata con contesto
 - `get_document` - Recupera documento completo
 - `list_sources` - Lista tutti i documenti
 - `get_stats` - Statistiche knowledge base
@@ -164,9 +231,9 @@ await supabase
 6. Esegui tool richiesto
 ```
 
-## 🚀 Usage Example
+## 🚀 Usage Examples
 
-### Da Claude Desktop
+### Da Claude Desktop (SSE Transport)
 
 **1. Genera API key dalla UI**
 ```
@@ -192,24 +259,135 @@ Dashboard → MCP → Generate API Key
 "Search in my knowledge base for database setup instructions"
 ```
 
-Claude userà automaticamente il tool `search_docs`.
+Claude userà automaticamente il tool `search_docs_rag`.
+
+---
+
+### Da applicazioni HTTP (HTTP Transport)
+
+**1. Lista tools disponibili**
+
+```bash
+curl -X POST https://your-app.vercel.app/api/mcp \
+  -H "Authorization: Bearer mcp_xxxxxxxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/list"
+  }'
+```
+
+**2. Esegui ricerca semantica**
+
+```bash
+curl -X POST https://your-app.vercel.app/api/mcp \
+  -H "Authorization: Bearer mcp_xxxxxxxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+      "name": "search_docs_rag",
+      "arguments": {
+        "query": "Fondo Byblos",
+        "limit": 5
+      }
+    }
+  }'
+```
+
+**3. Esempio JavaScript/TypeScript**
+
+```typescript
+async function searchDocs(query: string, apiKey: string) {
+  const response = await fetch('https://your-app.vercel.app/api/mcp', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: {
+        name: 'search_docs_rag',
+        arguments: {
+          query,
+          limit: 5,
+        },
+      },
+    }),
+  });
+
+  const data = await response.json();
+  if (data.error) {
+    throw new Error(data.error.message);
+  }
+  return JSON.parse(data.result.content[0].text);
+}
+```
+
+**4. Esempio Python**
+
+```python
+import requests
+import json
+
+def search_docs(query: str, api_key: str):
+    url = "https://your-app.vercel.app/api/mcp"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "search_docs_rag",
+            "arguments": {
+                "query": query,
+                "limit": 5
+            }
+        }
+    }
+    
+    response = requests.post(url, headers=headers, json=payload)
+    data = response.json()
+    
+    if "error" in data:
+        raise Exception(data["error"]["message"])
+    
+    result_text = data["result"]["content"][0]["text"]
+    return json.loads(result_text)
+```
 
 ## 📊 Monitoring
 
 ### Logging
 
+**SSE Transport:**
 ```typescript
 // Connection
 ✅ MCP Connection authenticated: { userId, ragId }
 🚀 MCP Server connected via SSE
+```
 
-// Tool calls
-🔍 Tool called: search_docs
-📄 Tool called: get_document
+**HTTP Transport:**
+```typescript
+// Connection
+📡 HTTP Transport request received
+✅ HTTP Transport authenticated: { userId, ragId }
+📥 HTTP Transport request: { method: 'tools/call', id: 1 }
+🔧 Executing tool: search_docs_rag
+✅ HTTP Transport response: tools/call search_docs_rag
 
 // Errors
-❌ Authentication failed: Invalid API key
-❌ Tool execution error: Database connection failed
+❌ HTTP Transport error: Method not found
+❌ HTTP Transport fatal error: Invalid API key
 ```
 
 ### Metrics
@@ -221,12 +399,25 @@ Ogni API key traccia:
 
 ## 🐛 Error Codes
 
+### HTTP Status Codes
+
 | Code | Message | Causa |
 |------|---------|-------|
 | 401 | Unauthorized | API key mancante/invalida |
-| 400 | RAG configuration incomplete | Config del RAG non completa |
-| 404 | RAG not found | RAG ID non esiste o non appartiene all'user |
+| 400 | Bad Request | Richiesta malformata o config RAG incompleta |
+| 404 | Not Found | Metodo non trovato |
 | 500 | Internal server error | Errore database o altro |
+
+### JSON-RPC Error Codes
+
+| Code | Name | Description |
+|------|------|-------------|
+| -32700 | Parse error | Invalid JSON was received |
+| -32600 | Invalid Request | The JSON sent is not a valid Request object |
+| -32601 | Method not found | The method does not exist / is not available |
+| -32602 | Invalid params | Invalid method parameter(s) |
+| -32603 | Internal error | Internal JSON-RPC error |
+| -32000 | Server error | Generic server error (authentication, config, etc.) |
 
 ## 🔄 Development
 
@@ -239,11 +430,38 @@ npm run dev
 # Genera API key dalla UI
 http://localhost:3000/app/{ragId}/mcp
 
-# Test con curl
+# Test SSE Transport (Claude Desktop)
 curl -N \
   -H "Authorization: Bearer mcp_xxx" \
   -H "Accept: text/event-stream" \
   http://localhost:3000/api/mcp
+
+# Test HTTP Transport - List tools
+curl -X POST http://localhost:3000/api/mcp \
+  -H "Authorization: Bearer mcp_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/list"
+  }'
+
+# Test HTTP Transport - Call tool
+curl -X POST http://localhost:3000/api/mcp \
+  -H "Authorization: Bearer mcp_xxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+      "name": "search_docs_rag",
+      "arguments": {
+        "query": "test query",
+        "limit": 3
+      }
+    }
+  }'
 ```
 
 ### Debug MCP Protocol
@@ -264,9 +482,24 @@ server.onNotification((notification) => {
 - [MCP Specification](https://spec.modelcontextprotocol.io/)
 - [MCP SDK Documentation](https://github.com/modelcontextprotocol/typescript-sdk)
 - [SSE Transport](https://spec.modelcontextprotocol.io/specification/basic/transports/#server-sent-events-sse)
+- [JSON-RPC 2.0 Specification](https://www.jsonrpc.org/specification)
+
+---
+
+## 🔄 Transport Selection
+
+Il server determina automaticamente il tipo di transport basandosi sull'header `Accept`:
+
+- **SSE Transport**: `Accept: text/event-stream` → Usa `GET /api/mcp`
+- **HTTP Transport**: `Accept: application/json` o assente → Usa `POST /api/mcp`
+
+Entrambi i transport condividono:
+- La stessa autenticazione (API key)
+- Gli stessi tools disponibili
+- La stessa logica di esecuzione
 
 ---
 
 **Status:** ✅ Production ready
-**Version:** 1.0.0
+**Version:** 1.1.0 (Added HTTP Transport support)
 
