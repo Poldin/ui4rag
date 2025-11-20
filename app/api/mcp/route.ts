@@ -32,6 +32,7 @@ async function saveMcpLog(
     error?: string;
     responseSize?: number;
     duration?: number;
+    response?: any;
   },
   origin?: {
     ip?: string;
@@ -43,10 +44,31 @@ async function saveMcpLog(
   try {
     const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
     
+    // Limita la dimensione della risposta per evitare problemi di storage
+    // Se la risposta è troppo grande, salviamo solo un preview
+    let responseToSave = metadata.response;
+    if (responseToSave) {
+      const responseStr = JSON.stringify(responseToSave);
+      const MAX_RESPONSE_SIZE = 50000; // ~50KB
+      if (responseStr.length > MAX_RESPONSE_SIZE) {
+        // Tronca la risposta e aggiungi un indicatore
+        responseToSave = {
+          _truncated: true,
+          _originalSize: responseStr.length,
+          _preview: JSON.parse(responseStr.substring(0, MAX_RESPONSE_SIZE)),
+        };
+      }
+    }
+    
+    const metadataToSave = {
+      ...metadata,
+      response: responseToSave,
+    };
+    
     await supabase.from('mcp_logs').insert({
       rag_id: ragId,
       apikey_id: apiKeyId || null,
-      metadata: metadata as any,
+      metadata: metadataToSave as any,
       origin: origin as any,
     });
   } catch (error) {
@@ -730,6 +752,7 @@ export async function GET(request: NextRequest) {
             success: true,
             responseSize: JSON.stringify({ tools }).length,
             duration,
+            response: { tools }, // Salva la risposta effettiva
           },
           origin,
           authData.apiKeyId
@@ -765,6 +788,15 @@ export async function GET(request: NextRequest) {
         const result = await executeTool(name, args, config);
         const duration = Date.now() - startTime;
         
+        // Estrai il contenuto della risposta MCP
+        let responseData = null;
+        try {
+          const resultText = result.content[0]?.text || '{}';
+          responseData = JSON.parse(resultText);
+        } catch (e) {
+          responseData = result.content[0]?.text || null;
+        }
+        
         // Salva log successo
         await saveMcpLog(
           authData.ragId,
@@ -775,6 +807,7 @@ export async function GET(request: NextRequest) {
             success: true,
             responseSize: JSON.stringify(result).length,
             duration,
+            response: responseData, // Salva la risposta effettiva
           },
           origin,
           authData.apiKeyId
@@ -1040,6 +1073,7 @@ export async function POST(request: NextRequest) {
                 success: true,
                 responseSize: JSON.stringify(response).length,
                 duration,
+                response: { tools }, // Salva la risposta effettiva
               },
               origin,
               authData.apiKeyId
@@ -1135,6 +1169,7 @@ export async function POST(request: NextRequest) {
                 success: true,
                 responseSize: JSON.stringify(resultData).length,
                 duration,
+                response: resultData, // Salva la risposta effettiva
               },
               origin,
               authData.apiKeyId
@@ -1196,6 +1231,7 @@ export async function POST(request: NextRequest) {
               success: true,
               responseSize: JSON.stringify(response).length,
               duration,
+              response: response.result, // Salva la risposta effettiva
             },
             origin,
             authData.apiKeyId

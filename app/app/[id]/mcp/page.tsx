@@ -17,7 +17,9 @@ import {
   Terminal,
   Settings,
   FileText,
-  Activity
+  Activity,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import { supabase } from "../../../../lib/supabase";
 
@@ -83,6 +85,19 @@ export default function MCPPage() {
   const [logs, setLogs] = useState<any[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsTotal, setLogsTotal] = useState(0);
+  const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
+  
+  const toggleLog = (logId: string) => {
+    setExpandedLogs(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(logId)) {
+        newSet.delete(logId);
+      } else {
+        newSet.add(logId);
+      }
+      return newSet;
+    });
+  };
 
   // Load RAG info and keys
   useEffect(() => {
@@ -246,9 +261,6 @@ export default function MCPPage() {
   useEffect(() => {
     if (mainTab === 'logs') {
       loadLogs();
-      // Refresh logs every 10 seconds when on logs tab
-      const interval = setInterval(loadLogs, 10000);
-      return () => clearInterval(interval);
     }
   }, [mainTab, ragId]);
 
@@ -1295,18 +1307,23 @@ If an error occurs, the server returns a JSON-RPC error response:
                   const isSuccess = metadata.success !== false;
                   const apiKey = (log as any).api_keys;
                   const apiKeyName = apiKey?.name || 'Unnamed key';
+                  const isExpanded = expandedLogs.has(log.id);
                   
                   return (
                     <div
                       key={log.id}
-                      className={`bg-white border rounded-lg p-4 ${
-                        isSuccess ? 'border-gray-200' : 'border-red-200 bg-red-50'
+                      className={`bg-white border rounded-lg overflow-hidden transition-colors ${
+                        isSuccess ? 'border-gray-200 hover:border-gray-300' : 'border-red-200 bg-red-50 hover:bg-red-100'
                       }`}
                     >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
+                      {/* Header - Always visible */}
+                      <button
+                        onClick={() => toggleLog(log.id)}
+                        className="w-full p-4 text-left flex items-start justify-between gap-4 hover:bg-gray-50 transition-colors"
+                      >
+                        <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-2 flex-wrap">
-                            <div className={`w-2 h-2 rounded-full ${
+                            <div className={`w-2 h-2 rounded-full shrink-0 ${
                               isSuccess ? 'bg-green-500' : 'bg-red-500'
                             }`} />
                             <code className="text-sm font-semibold text-gray-900">
@@ -1320,7 +1337,7 @@ If an error occurs, the server returns a JSON-RPC error response:
                                 </code>
                               </>
                             )}
-                            <span className={`px-2 py-0.5 text-xs font-medium rounded ${
+                            <span className={`px-2 py-0.5 text-xs font-medium rounded shrink-0 ${
                               isSuccess 
                                 ? 'bg-green-100 text-green-700' 
                                 : 'bg-red-100 text-red-700'
@@ -1328,7 +1345,7 @@ If an error occurs, the server returns a JSON-RPC error response:
                               {isSuccess ? 'Success' : 'Error'}
                             </span>
                             {log.apikey_id && (
-                              <div className="flex items-center gap-1.5 px-2 py-0.5 bg-blue-50 border border-blue-200 rounded">
+                              <div className="flex items-center gap-1.5 px-2 py-0.5 bg-blue-50 border border-blue-200 rounded shrink-0">
                                 <Key className="w-3 h-3 text-blue-600" />
                                 <span className="text-xs font-medium text-blue-700">
                                   {apiKeyName}
@@ -1337,17 +1354,43 @@ If an error occurs, the server returns a JSON-RPC error response:
                             )}
                           </div>
                           
-                          <div className="grid grid-cols-2 gap-4 text-xs text-gray-600 mb-3">
-                            <div>
-                              <span className="font-medium">Time:</span>{' '}
-                              {formatDateTime(log.created_at)}
-                            </div>
+                          {/* Summary info - Always visible */}
+                          <div className="flex items-center gap-4 text-xs text-gray-600 flex-wrap">
+                            <span>{formatDateTime(log.created_at)}</span>
                             {metadata.duration !== undefined && (
-                              <div>
-                                <span className="font-medium">Duration:</span>{' '}
+                              <span className="flex items-center gap-1">
+                                <span className="font-medium">Duration:</span>
                                 {metadata.duration}ms
-                              </div>
+                              </span>
                             )}
+                            {metadata.responseSize !== undefined && (
+                              <span className="flex items-center gap-1">
+                                <span className="font-medium">Size:</span>
+                                {(metadata.responseSize / 1024).toFixed(2)} KB
+                              </span>
+                            )}
+                            {metadata.error && (
+                              <span className="text-red-600 font-medium truncate max-w-xs">
+                                {metadata.error}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        
+                        {/* Expand/Collapse icon */}
+                        <div className="shrink-0 pt-0.5">
+                          {isExpanded ? (
+                            <ChevronUp className="w-5 h-5 text-gray-400" />
+                          ) : (
+                            <ChevronDown className="w-5 h-5 text-gray-400" />
+                          )}
+                        </div>
+                      </button>
+                      
+                      {/* Details - Only visible when expanded */}
+                      {isExpanded && (
+                        <div className="px-4 pb-4 border-t border-gray-200 pt-4 space-y-3">
+                          <div className="grid grid-cols-2 gap-4 text-xs text-gray-600">
                             {metadata.responseSize !== undefined && (
                               <div>
                                 <span className="font-medium">Response Size:</span>{' '}
@@ -1366,10 +1409,16 @@ If an error occurs, the server returns a JSON-RPC error response:
                                 <span className="text-gray-500">{origin.userAgent}</span>
                               </div>
                             )}
+                            {origin.ip && (
+                              <div>
+                                <span className="font-medium">IP:</span>{' '}
+                                <span className="text-gray-500">{origin.ip}</span>
+                              </div>
+                            )}
                           </div>
 
                           {metadata.args && Object.keys(metadata.args).length > 0 && (
-                            <div className="mb-3">
+                            <div>
                               <p className="text-xs font-medium text-gray-700 mb-1">Arguments:</p>
                               <pre className="bg-gray-900 text-gray-100 p-2 rounded text-xs overflow-x-auto font-mono">
                                 {JSON.stringify(metadata.args, null, 2)}
@@ -1378,7 +1427,7 @@ If an error occurs, the server returns a JSON-RPC error response:
                           )}
 
                           {metadata.error && (
-                            <div className="mb-3">
+                            <div>
                               <p className="text-xs font-medium text-red-700 mb-1">Error:</p>
                               <div className="bg-red-100 border border-red-200 rounded p-2">
                                 <p className="text-xs text-red-800">{metadata.error}</p>
@@ -1386,13 +1435,21 @@ If an error occurs, the server returns a JSON-RPC error response:
                             </div>
                           )}
 
-                          {origin.ip && (
-                            <div className="text-xs text-gray-500">
-                              <span className="font-medium">IP:</span> {origin.ip}
+                          {metadata.response && (
+                            <div>
+                              <p className="text-xs font-medium text-gray-700 mb-1">Response:</p>
+                              <pre className="bg-gray-900 text-gray-100 p-2 rounded text-xs overflow-x-auto font-mono max-h-96 overflow-y-auto">
+                                {JSON.stringify(metadata.response, null, 2)}
+                              </pre>
+                              {metadata.response._truncated && (
+                                <p className="text-xs text-gray-500 mt-1">
+                                  Response truncated. Original size: {(metadata.response._originalSize / 1024).toFixed(2)} KB
+                                </p>
+                              )}
                             </div>
                           )}
                         </div>
-                      </div>
+                      )}
                     </div>
                   );
                 })}
