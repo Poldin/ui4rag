@@ -184,54 +184,90 @@ export class RAGStorage {
   ): Promise<SearchResult[]> {
     const pool = this.getPool();
 
-    // 1. Genera embedding della query
-    const { embedding } = await generateEmbedding(
-      query,
-      this.config.embeddingConfig
-    );
-    const vectorString = arrayToVectorString(embedding);
+    try {
+      // 1. Genera embedding della query
+      const { embedding } = await generateEmbedding(
+        query,
+        this.config.embeddingConfig
+      );
+      const vectorString = arrayToVectorString(embedding);
 
-    // 2. Similarity search con JOIN alla tabella sources
-    const result = await pool.query(
-      `SELECT 
-        c.id as chunk_id,
-        c.source_id,
-        c.content as chunk_content,
-        c.chunk_index,
-        c.chunk_total,
-        c.metadata as chunk_metadata,
-        s.title as source_title,
-        s.source_type,
-        s.metadata as source_metadata,
-        (c.embedding <=> $1::vector) as distance
-       FROM ${this.config.chunksTableName} c
-       JOIN ${this.config.sourcesTableName} s ON c.source_id = s.id
-       WHERE c.embedding IS NOT NULL
-       ORDER BY c.embedding <=> $1::vector
-       LIMIT $2`,
-      [vectorString, limit]
-    );
+      // 2. Similarity search con JOIN alla tabella sources
+      const result = await pool.query(
+        `SELECT 
+          c.id as chunk_id,
+          c.source_id,
+          c.content as chunk_content,
+          c.chunk_index,
+          c.chunk_total,
+          c.metadata as chunk_metadata,
+          s.title as source_title,
+          s.source_type,
+          s.metadata as source_metadata,
+          (c.embedding <=> $1::vector) as distance
+         FROM ${this.config.chunksTableName} c
+         JOIN ${this.config.sourcesTableName} s ON c.source_id = s.id
+         WHERE c.embedding IS NOT NULL
+         ORDER BY c.embedding <=> $1::vector
+         LIMIT $2`,
+        [vectorString, limit]
+      );
 
-    // 3. Formatta risultati
-    return result.rows
-      .map((row) => {
-        const similarity = 1 - row.distance; // cosine similarity = 1 - cosine distance
-        return {
-          chunkId: row.chunk_id,
-          sourceId: row.source_id,
-          chunkContent: row.chunk_content,
-          sourceTitle: row.source_title,
-          sourceType: row.source_type,
-          similarity: parseFloat((similarity * 100).toFixed(2)),
-          chunkIndex: row.chunk_index,
-          chunkTotal: row.chunk_total,
-          metadata: {
-            ...row.chunk_metadata,
-            ...row.source_metadata,
-          },
-        };
-      })
-      .filter((result) => result.similarity >= minSimilarity);
+      // 3. Formatta risultati
+      return result.rows
+        .map((row) => {
+          const similarity = 1 - row.distance; // cosine similarity = 1 - cosine distance
+          return {
+            chunkId: row.chunk_id,
+            sourceId: row.source_id,
+            chunkContent: row.chunk_content,
+            sourceTitle: row.source_title,
+            sourceType: row.source_type,
+            similarity: parseFloat((similarity * 100).toFixed(2)),
+            chunkIndex: row.chunk_index,
+            chunkTotal: row.chunk_total,
+            metadata: {
+              ...row.chunk_metadata,
+              ...row.source_metadata,
+            },
+          };
+        })
+        .filter((result) => result.similarity >= minSimilarity);
+    } catch (error: any) {
+      // Migliora messaggi di errore per debug
+      if (error.code === '42P01') {
+        // Table does not exist
+        throw new Error(
+          `Table not found: ${error.message.includes(this.config.chunksTableName) ? this.config.chunksTableName : this.config.sourcesTableName}. ` +
+          `Please ensure the tables exist in your database.`
+        );
+      }
+      if (error.code === '42883') {
+        // Operator does not exist (pgvector extension not installed)
+        throw new Error(
+          `PostgreSQL vector extension (pgvector) is not installed or enabled. ` +
+          `Please run: CREATE EXTENSION IF NOT EXISTS vector;`
+        );
+      }
+      if (error.code === '42703') {
+        // Column does not exist
+        throw new Error(
+          `Column not found in table. Please check your database schema matches the expected structure. ` +
+          `Error: ${error.message}`
+        );
+      }
+      if (error.message?.includes('connection')) {
+        throw new Error(
+          `Database connection failed: ${error.message}. ` +
+          `Please check your connection string and database availability.`
+        );
+      }
+      // Rilancia l'errore originale con più contesto
+      throw new Error(
+        `Search failed: ${error.message}. ` +
+        `Tables: ${this.config.chunksTableName}, ${this.config.sourcesTableName}`
+      );
+    }
   }
 
   /**

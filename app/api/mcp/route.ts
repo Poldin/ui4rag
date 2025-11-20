@@ -69,14 +69,39 @@ async function validateApiKey(apiKey: string): Promise<{
     .single();
 
   if (ragError || !ragData) {
-    console.error('Error fetching RAG config:', ragError);
+    console.error('❌ Error fetching RAG config:', {
+      error: ragError,
+      ragId: matchedKey.rag_id,
+      userId: matchedKey.user_id,
+    });
     return null;
   }
+
+  // Verifica che la config esista e sia un oggetto valido
+  if (!ragData.config || typeof ragData.config !== 'object' || Array.isArray(ragData.config)) {
+    console.error('❌ Invalid RAG config format:', {
+      ragId: matchedKey.rag_id,
+      configType: typeof ragData.config,
+      isArray: Array.isArray(ragData.config),
+    });
+    return null;
+  }
+
+  // Cast a tipo oggetto per TypeScript
+  const config = ragData.config as Record<string, any>;
+
+  console.log('✅ RAG config loaded successfully:', {
+    ragId: matchedKey.rag_id,
+    hasConnectionString: !!config.connectionString,
+    hasApiKey: !!config.apiKey,
+    sourcesTableName: config.sourcesTableName,
+    chunksTableName: config.chunksTableName,
+  });
 
   return {
     userId: matchedKey.user_id,
     ragId: matchedKey.rag_id,
-    ragConfig: ragData.config,
+    ragConfig: config,
   };
 }
 
@@ -251,9 +276,28 @@ async function executeTool(
   args: any,
   config: any
 ): Promise<{ content: Array<{ type: string; text: string }> }> {
-  const ragStorage = createRAGStorage(config);
-
+  let ragStorage: RAGStorage | null = null;
+  
   try {
+    // Valida configurazione prima di creare RAGStorage
+    if (!config?.connectionString) {
+      throw new Error('Database connection string is missing in RAG config');
+    }
+    if (!config?.apiKey) {
+      throw new Error('OpenAI API key is missing in RAG config');
+    }
+
+    // Log della configurazione che verrà usata (senza dati sensibili)
+    console.log('🗄️ Creating RAGStorage with config:', {
+      hasConnectionString: !!config.connectionString,
+      connectionStringPreview: config.connectionString?.substring(0, 50) + '...',
+      sourcesTableName: config.sourcesTableName || 'gimme_rag_sources',
+      chunksTableName: config.chunksTableName || 'gimme_rag_chunks',
+      embeddingModel: config.embeddingModel || 'text-embedding-3-small',
+      embeddingDimensions: config.embeddingDimensions || 1536,
+    });
+
+    ragStorage = createRAGStorage(config);
     switch (name) {
       case 'search_docs_rag': {
         const { query, limit = 5 } = args as { query: string; limit?: number };
@@ -422,8 +466,25 @@ async function executeTool(
           `Unknown tool: ${name}`
         );
     }
+  } catch (error: any) {
+    // Log dettagliato dell'errore per debug
+    console.error(`❌ Error in tool ${name}:`, {
+      error: error.message,
+      stack: error.stack,
+      name: error.name,
+      code: error.code,
+      toolArgs: args,
+    });
+    throw error;
   } finally {
-    await ragStorage.close();
+    // Chiudi connessione database in modo sicuro
+    if (ragStorage) {
+      try {
+        await ragStorage.close();
+      } catch (closeError) {
+        console.error('❌ Error closing RAGStorage:', closeError);
+      }
+    }
   }
 }
 
@@ -679,16 +740,59 @@ export async function POST(request: NextRequest) {
 
     // Verifica che la config sia completa
     const config = authData.ragConfig;
-    if (!config?.connectionString || !config?.apiKey) {
+    
+    // Log della config (senza dati sensibili) per debug
+    console.log('📋 RAG Config loaded:', {
+      ragId: authData.ragId,
+      hasConnectionString: !!config?.connectionString,
+      hasApiKey: !!config?.apiKey,
+      sourcesTableName: config?.sourcesTableName,
+      chunksTableName: config?.chunksTableName,
+      embeddingModel: config?.embeddingModel,
+      embeddingDimensions: config?.embeddingDimensions,
+      vectorDb: config?.vectorDb,
+    });
+
+    // Validazione completa della configurazione
+    if (!config) {
       const errorResponse = createJSONRPCErrorResponse(
         null,
         -32000,
-        'RAG configuration incomplete'
+        'RAG configuration not found'
       );
       return new Response(JSON.stringify(errorResponse), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
+    }
+
+    if (!config.connectionString) {
+      const errorResponse = createJSONRPCErrorResponse(
+        null,
+        -32000,
+        'RAG configuration incomplete: missing connectionString'
+      );
+      return new Response(JSON.stringify(errorResponse), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (!config.apiKey) {
+      const errorResponse = createJSONRPCErrorResponse(
+        null,
+        -32000,
+        'RAG configuration incomplete: missing apiKey'
+      );
+      return new Response(JSON.stringify(errorResponse), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // Verifica che le tabelle siano specificate (hanno default ma meglio essere espliciti)
+    if (!config.sourcesTableName || !config.chunksTableName) {
+      console.warn('⚠️ Table names not specified, using defaults');
     }
 
     // Parsa body della richiesta
@@ -732,15 +836,20 @@ export async function POST(request: NextRequest) {
     try {
       switch (jsonrpcRequest.method) {
         case 'tools/list': {
-          const tools = getToolsDefinition();
-          const response = createJSONRPCSuccessResponse(jsonrpcRequest.id, {
-            tools,
-          });
-          console.log('✅ HTTP Transport response: tools/list');
-          return new Response(JSON.stringify(response), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          });
+          try {
+            const tools = getToolsDefinition();
+            const response = createJSONRPCSuccessResponse(jsonrpcRequest.id, {
+              tools,
+            });
+            console.log('✅ HTTP Transport response: tools/list', { toolCount: tools.length });
+            return new Response(JSON.stringify(response), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          } catch (error: any) {
+            console.error('❌ Error in tools/list:', error);
+            throw error;
+          }
         }
 
         case 'tools/call': {
@@ -757,26 +866,56 @@ export async function POST(request: NextRequest) {
             throw new Error('Missing tool name in params');
           }
 
-          console.log('🔧 Executing tool:', name);
-
-          const toolResult = await executeTool(name, args || {}, config);
-
-          // Estrai il testo dal risultato MCP e parsalo come JSON per la risposta
-          const resultText = toolResult.content[0]?.text || '{}';
-          let resultData;
-          try {
-            resultData = JSON.parse(resultText);
-          } catch {
-            // Se non è JSON valido, restituisci il testo come stringa
-            resultData = resultText;
-          }
-
-          const response = createJSONRPCSuccessResponse(jsonrpcRequest.id, resultData);
-          console.log('✅ HTTP Transport response: tools/call', name);
-          return new Response(JSON.stringify(response), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
+          console.log('🔧 Executing tool:', name, { 
+            args: args ? Object.keys(args) : [],
+            ragId: authData.ragId 
           });
+
+          try {
+            // La config è già validata sopra, ma verifichiamo di nuovo per sicurezza
+            if (!config?.connectionString) {
+              throw new Error('RAG configuration incomplete: missing connectionString');
+            }
+            if (!config?.apiKey) {
+              throw new Error('RAG configuration incomplete: missing apiKey');
+            }
+
+            console.log('🔧 Tool execution config:', {
+              tool: name,
+              sourcesTable: config.sourcesTableName || 'gimme_rag_sources',
+              chunksTable: config.chunksTableName || 'gimme_rag_chunks',
+              embeddingModel: config.embeddingModel || 'text-embedding-3-small',
+              embeddingDimensions: config.embeddingDimensions || 1536,
+            });
+
+            const toolResult = await executeTool(name, args || {}, config);
+
+            // Estrai il testo dal risultato MCP e parsalo come JSON per la risposta
+            const resultText = toolResult.content[0]?.text || '{}';
+            let resultData;
+            try {
+              resultData = JSON.parse(resultText);
+            } catch (parseError) {
+              console.warn('⚠️ Result is not JSON, returning as string');
+              resultData = resultText;
+            }
+
+            const response = createJSONRPCSuccessResponse(jsonrpcRequest.id, resultData);
+            console.log('✅ HTTP Transport response: tools/call', name, { 
+              resultSize: JSON.stringify(resultData).length 
+            });
+            return new Response(JSON.stringify(response), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          } catch (toolError: any) {
+            console.error('❌ Error executing tool:', name, {
+              error: toolError.message,
+              stack: toolError.stack,
+              name: toolError.name,
+            });
+            throw toolError;
+          }
         }
 
         case 'initialize': {
@@ -813,7 +952,14 @@ export async function POST(request: NextRequest) {
         }
       }
     } catch (error: any) {
-      console.error('❌ HTTP Transport error:', error);
+      console.error('❌ HTTP Transport error:', {
+        method: jsonrpcRequest?.method,
+        id: jsonrpcRequest?.id,
+        error: error.message,
+        stack: error.stack,
+        name: error.name,
+        code: error.code,
+      });
 
       // Se è un McpError, mappalo a JSON-RPC error
       if (error instanceof McpError) {
@@ -830,11 +976,17 @@ export async function POST(request: NextRequest) {
         });
       }
 
-      // Errore generico
+      // Errore generico - includi più dettagli per debug
+      const errorMessage = error.message || 'Internal error';
       const errorResponse = createJSONRPCErrorResponse(
         jsonrpcRequest.id,
         -32603,
-        error.message || 'Internal error'
+        errorMessage,
+        process.env.NODE_ENV === 'development' ? {
+          stack: error.stack,
+          name: error.name,
+          code: error.code,
+        } : undefined
       );
       return new Response(JSON.stringify(errorResponse), {
         status: 500,
@@ -842,11 +994,21 @@ export async function POST(request: NextRequest) {
       });
     }
   } catch (error: any) {
-    console.error('❌ HTTP Transport fatal error:', error);
+    console.error('❌ HTTP Transport fatal error:', {
+      error: error.message,
+      stack: error.stack,
+      name: error.name,
+      code: error.code,
+    });
+    
     const errorResponse = createJSONRPCErrorResponse(
       null,
       -32603,
-      error.message || 'Internal server error'
+      error.message || 'Internal server error',
+      process.env.NODE_ENV === 'development' ? {
+        stack: error.stack,
+        name: error.name,
+      } : undefined
     );
     return new Response(JSON.stringify(errorResponse), {
       status: 500,
