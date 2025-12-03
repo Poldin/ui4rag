@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useParams } from "next/navigation";
-import { Upload, Loader2, Check, X, FileText, AlertTriangle } from "lucide-react";
+import { Upload, Loader2, Check, X, FileText, AlertTriangle, Copy } from "lucide-react";
 import PendingChanges from "../../../../components/PendingChanges";
 import { addToPendingChangesWithChunking } from "../../../../../lib/utils/pending-changes-helper";
 import { createDocumentChunks } from "../../../../../lib/utils/document-chunker";
@@ -38,6 +38,7 @@ export default function DocsSourcePage() {
   
   // Sidebar per vedere contenuto estratto
   const [selectedDoc, setSelectedDoc] = useState<DocumentData | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     if (typeof window !== 'undefined') {
       const saved = sessionStorage.getItem('docs-sidebar-width');
@@ -223,6 +224,17 @@ export default function DocsSourcePage() {
   const handleClearAll = () => {
     setDocuments([]);
     setError('');
+  };
+
+  // Funzione per copiare il testo estratto
+  const handleCopyExtractedText = async (text: string, docId: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedId(docId);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch (err) {
+      console.error('Failed to copy text:', err);
+    }
   };
 
   // Resize handlers per la sidebar
@@ -570,17 +582,33 @@ export default function DocsSourcePage() {
                                   </span>
                                 </div>
                                 
-                                {/* Bottone per vedere contenuto */}
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSelectedDoc(doc);
-                                  }}
-                                  className="mt-2 px-3 py-1.5 text-xs text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center gap-1.5"
-                                >
-                                  <FileText className="w-3.5 h-3.5" />
-                                  View Extracted Text
-                                </button>
+                                {/* Bottoni per vedere e copiare contenuto */}
+                                <div className="flex items-center gap-2 mt-2">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedDoc(doc);
+                                    }}
+                                    className="px-3 py-1.5 text-xs text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors flex items-center gap-1.5"
+                                  >
+                                    <FileText className="w-3.5 h-3.5" />
+                                    View Extracted Text
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleCopyExtractedText(doc.fullText, doc.id);
+                                    }}
+                                    className="p-1.5 text-gray-500 bg-white border border-gray-300 rounded-md hover:bg-gray-50 hover:text-gray-700 transition-all duration-200"
+                                    title="Copy extracted text"
+                                  >
+                                    {copiedId === doc.id ? (
+                                      <Check className="w-3.5 h-3.5 text-green-600" />
+                                    ) : (
+                                      <Copy className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
+                                </div>
                               </>
                             )}
                           </div>
@@ -649,6 +677,17 @@ export default function DocsSourcePage() {
             <div className="flex items-center gap-2">
               <FileText className="w-5 h-5 text-gray-700" />
               <h2 className="text-base font-semibold text-gray-900">Extracted Text</h2>
+              <button
+                onClick={() => handleCopyExtractedText(selectedDoc.fullText, `sidebar-${selectedDoc.id}`)}
+                className="p-1.5 hover:bg-gray-200 rounded-md transition-all duration-200 group relative"
+                title="Copy extracted text"
+              >
+                {copiedId === `sidebar-${selectedDoc.id}` ? (
+                  <Check className="w-4 h-4 text-green-600 animate-[scale_0.2s_ease-out]" />
+                ) : (
+                  <Copy className="w-4 h-4 text-gray-500 group-hover:text-gray-700" />
+                )}
+              </button>
             </div>
             <button
               onClick={() => setSelectedDoc(null)}
