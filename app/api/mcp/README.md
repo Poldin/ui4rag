@@ -6,7 +6,7 @@ Questo folder contiene l'implementazione del **Model Context Protocol (MCP) serv
 
 ```
 /api/mcp/
-├── route.ts              # MCP Server (SSE transport)
+├── route.ts              # MCP Server (SSE + HTTP transport)
 └── keys/
     ├── generate/
     │   └── route.ts      # POST - Genera nuova API key
@@ -63,10 +63,11 @@ o per chiamare un tool:
   "id": 2,
   "method": "tools/call",
   "params": {
-    "name": "search_docs_rag",
+    "name": "search",
     "arguments": {
       "query": "database configuration",
-      "limit": 5
+      "limit": 5,
+      "mode": "hybrid"
     }
   }
 }
@@ -100,104 +101,121 @@ o per chiamare un tool:
 - `tools/call` - Esegue un tool specifico
 - `initialize` - Handshake iniziale (opzionale)
 
-**Tools disponibili:**
-- `search_docs_rag` - Semantic search con embeddings (RAG)
-- `search_docs_keyword` - Ricerca keyword avanzata con contesto
-- `get_document` - Recupera documento completo
-- `list_sources` - Lista tutti i documenti
-- `get_stats` - Statistiche knowledge base
-
 ---
 
-### 2. Generate API Key
+## 🔧 Tools Disponibili
 
-**`POST /api/mcp/keys/generate`**
+### 1. `search` (Primary Tool)
 
-Genera una nuova API key per accesso MCP.
+**Hybrid Search** - Combina ricerca semantica (embeddings) + keyword (full-text search).
 
-**Body:**
-```json
-{
-  "ragId": "uuid-del-rag",
-  "name": "Claude Desktop - MacBook (optional)"
-}
-```
+| Parametro | Tipo | Default | Descrizione |
+|-----------|------|---------|-------------|
+| `query` | string | required | Query di ricerca |
+| `limit` | number | 5 | Numero max risultati |
+| `mode` | enum | "hybrid" | `hybrid`, `semantic`, `keyword` |
+
+**Modalità:**
+- **`hybrid`** (default): Combina semantic + keyword. Migliore per la maggior parte delle query.
+- **`semantic`**: Solo ricerca per similarità concettuale. Utile per parafrasi.
+- **`keyword`**: Solo ricerca per termine esatto. Utile per nomi, codici, sigle.
 
 **Response:**
 ```json
 {
-  "success": true,
-  "apiKey": "mcp_xxxxxxxxxxxxxxxxxxxxx",
-  "keyInfo": {
-    "id": "uuid",
-    "name": "Claude Desktop - MacBook",
-    "created_at": "2024-01-01T00:00:00Z",
-    "scopes": ["read"]
-  },
-  "warning": "Save this API key now. It will not be shown again."
-}
-```
-
-**⚠️ Importante:** La API key è mostrata SOLO alla creazione!
-
----
-
-### 3. List API Keys
-
-**`GET /api/mcp/keys/list?ragId=xxx`**
-
-Lista tutte le API keys per un RAG specifico.
-
-**Query Params:**
-- `ragId` (required): UUID del RAG
-
-**Response:**
-```json
-{
-  "success": true,
-  "keys": [
+  "query": "fondo pensione",
+  "mode": "hybrid",
+  "count": 3,
+  "results": [
     {
-      "id": "uuid",
-      "name": "Claude Desktop - MacBook",
-      "created_at": "2024-01-01T00:00:00Z",
-      "last_used_at": "2024-01-15T10:30:00Z",
-      "is_active": true,
-      "scopes": ["read"],
-      "metadata": {}
+      "id": "chunk-uuid",
+      "sourceId": "source-uuid",
+      "sourceTitle": "Regolamento Byblos",
+      "sourceType": "docs",
+      "content": "Il Fondo Byblos è un fondo pensione...",
+      "chunkIndex": 2,
+      "chunkTotal": 15,
+      "semanticScore": 85.5,
+      "keywordScore": 92.3,
+      "combinedScore": 87.5,
+      "matchType": "both"
     }
   ]
 }
 ```
 
+**matchType:**
+- `both`: Match sia semantico che keyword
+- `semantic_only`: Match solo semantico
+- `keyword_only`: Match solo keyword
+
 ---
 
-### 4. Revoke/Delete API Key
+### 2. `get_context`
 
-**`POST /api/mcp/keys/revoke`** - Disattiva la key (soft delete)
+Recupera chunk adiacenti per espandere il contesto di un risultato.
 
-**Body:**
-```json
-{
-  "keyId": "uuid-della-key"
-}
-```
-
-**`DELETE /api/mcp/keys/revoke`** - Elimina permanentemente
-
-**Body:**
-```json
-{
-  "keyId": "uuid-della-key"
-}
-```
+| Parametro | Tipo | Default | Descrizione |
+|-----------|------|---------|-------------|
+| `chunkId` | string | required | UUID del chunk (da search results) |
+| `window` | number | 2 | Chunks prima e dopo da recuperare |
 
 **Response:**
 ```json
 {
-  "success": true,
-  "message": "API key revoked/deleted successfully"
+  "targetChunkId": "chunk-uuid",
+  "window": 2,
+  "sourceId": "source-uuid",
+  "sourceTitle": "Documento XYZ",
+  "chunksRetrieved": 5,
+  "chunks": [
+    {
+      "id": "chunk-1",
+      "content": "...",
+      "chunkIndex": 0,
+      "isTarget": false,
+      "relativePosition": -2
+    },
+    {
+      "id": "chunk-2",
+      "content": "...",
+      "chunkIndex": 2,
+      "isTarget": true,
+      "relativePosition": 0
+    }
+  ],
+  "concatenatedContent": "Testo completo concatenato..."
 }
 ```
+
+---
+
+### 3. `get_document`
+
+Recupera documento completo con tutti i suoi chunks.
+
+| Parametro | Tipo | Default | Descrizione |
+|-----------|------|---------|-------------|
+| `sourceId` | string | required | UUID del documento |
+
+---
+
+### 4. `list_sources`
+
+Lista tutti i documenti nella knowledge base.
+
+| Parametro | Tipo | Default | Descrizione |
+|-----------|------|---------|-------------|
+| `limit` | number | 50 | Numero max documenti |
+| `offset` | number | 0 | Skip per paginazione |
+
+---
+
+### 5. `get_stats`
+
+Statistiche della knowledge base (totale sources, chunks, ecc.).
+
+---
 
 ## 🔐 Sicurezza
 
@@ -219,17 +237,7 @@ await supabase
   .insert({ key_hash: keyHash, ... });
 ```
 
-### Validazione
-
-```typescript
-// Ad ogni richiesta MCP
-1. Estrai Bearer token
-2. Query tutti gli hash da DB
-3. bcrypt.compare(token, hash) per ogni key
-4. Se match → autenticato
-5. Carica config RAG associato
-6. Esegui tool richiesto
-```
+---
 
 ## 🚀 Usage Examples
 
@@ -256,10 +264,10 @@ Dashboard → MCP → Generate API Key
 
 **3. Usa in Claude**
 ```
-"Search in my knowledge base for database setup instructions"
+"Search in my knowledge base for pension fund regulations"
 ```
 
-Claude userà automaticamente il tool `search_docs_rag`.
+Claude userà automaticamente il tool `search` con hybrid mode.
 
 ---
 
@@ -278,7 +286,7 @@ curl -X POST https://your-app.vercel.app/api/mcp \
   }'
 ```
 
-**2. Esegui ricerca semantica**
+**2. Hybrid Search (default)**
 
 ```bash
 curl -X POST https://your-app.vercel.app/api/mcp \
@@ -289,19 +297,40 @@ curl -X POST https://your-app.vercel.app/api/mcp \
     "id": 2,
     "method": "tools/call",
     "params": {
-      "name": "search_docs_rag",
+      "name": "search",
       "arguments": {
         "query": "Fondo Byblos",
-        "limit": 5
+        "limit": 5,
+        "mode": "hybrid"
       }
     }
   }'
 ```
 
-**3. Esempio JavaScript/TypeScript**
+**3. Get Context**
+
+```bash
+curl -X POST https://your-app.vercel.app/api/mcp \
+  -H "Authorization: Bearer mcp_xxxxxxxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "get_context",
+      "arguments": {
+        "chunkId": "uuid-del-chunk",
+        "window": 2
+      }
+    }
+  }'
+```
+
+**4. Esempio JavaScript/TypeScript**
 
 ```typescript
-async function searchDocs(query: string, apiKey: string) {
+async function searchDocs(query: string, apiKey: string, mode: 'hybrid' | 'semantic' | 'keyword' = 'hybrid') {
   const response = await fetch('https://your-app.vercel.app/api/mcp', {
     method: 'POST',
     headers: {
@@ -313,30 +342,28 @@ async function searchDocs(query: string, apiKey: string) {
       id: 1,
       method: 'tools/call',
       params: {
-        name: 'search_docs_rag',
-        arguments: {
-          query,
-          limit: 5,
-        },
+        name: 'search',
+        arguments: { query, limit: 5, mode },
       },
     }),
   });
 
   const data = await response.json();
-  if (data.error) {
-    throw new Error(data.error.message);
-  }
-  return JSON.parse(data.result.content[0].text);
+  if (data.error) throw new Error(data.error.message);
+  return data.result;
 }
+
+// Usage
+const results = await searchDocs('fondo pensione', 'mcp_xxx', 'hybrid');
+console.log(results);
 ```
 
-**4. Esempio Python**
+**5. Esempio Python**
 
 ```python
 import requests
-import json
 
-def search_docs(query: str, api_key: str):
+def search_docs(query: str, api_key: str, mode: str = "hybrid"):
     url = "https://your-app.vercel.app/api/mcp"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -347,10 +374,11 @@ def search_docs(query: str, api_key: str):
         "id": 1,
         "method": "tools/call",
         "params": {
-            "name": "search_docs_rag",
+            "name": "search",
             "arguments": {
                 "query": query,
-                "limit": 5
+                "limit": 5,
+                "mode": mode
             }
         }
     }
@@ -361,33 +389,32 @@ def search_docs(query: str, api_key: str):
     if "error" in data:
         raise Exception(data["error"]["message"])
     
-    result_text = data["result"]["content"][0]["text"]
-    return json.loads(result_text)
+    return data["result"]
+
+# Usage
+results = search_docs("fondo pensione", "mcp_xxx", "hybrid")
+print(results)
 ```
+
+---
 
 ## 📊 Monitoring
 
 ### Logging
 
 **SSE Transport:**
-```typescript
-// Connection
+```
 ✅ MCP Connection authenticated: { userId, ragId }
 🚀 MCP Server connected via SSE
 ```
 
 **HTTP Transport:**
-```typescript
-// Connection
+```
 📡 HTTP Transport request received
 ✅ HTTP Transport authenticated: { userId, ragId }
 📥 HTTP Transport request: { method: 'tools/call', id: 1 }
-🔧 Executing tool: search_docs_rag
-✅ HTTP Transport response: tools/call search_docs_rag
-
-// Errors
-❌ HTTP Transport error: Method not found
-❌ HTTP Transport fatal error: Invalid API key
+🔧 Executing tool: search
+✅ HTTP Transport response: tools/call search
 ```
 
 ### Metrics
@@ -396,6 +423,8 @@ Ogni API key traccia:
 - `last_used_at` - Aggiornato ad ogni richiesta
 - Tool usage count (futuro)
 - Error rate (futuro)
+
+---
 
 ## 🐛 Error Codes
 
@@ -418,6 +447,8 @@ Ogni API key traccia:
 | -32602 | Invalid params | Invalid method parameter(s) |
 | -32603 | Internal error | Internal JSON-RPC error |
 | -32000 | Server error | Generic server error (authentication, config, etc.) |
+
+---
 
 ## 🔄 Development
 
@@ -446,7 +477,7 @@ curl -X POST http://localhost:3000/api/mcp \
     "method": "tools/list"
   }'
 
-# Test HTTP Transport - Call tool
+# Test HTTP Transport - Hybrid Search
 curl -X POST http://localhost:3000/api/mcp \
   -H "Authorization: Bearer mcp_xxx" \
   -H "Content-Type: application/json" \
@@ -455,27 +486,17 @@ curl -X POST http://localhost:3000/api/mcp \
     "id": 2,
     "method": "tools/call",
     "params": {
-      "name": "search_docs_rag",
+      "name": "search",
       "arguments": {
         "query": "test query",
-        "limit": 3
+        "limit": 3,
+        "mode": "hybrid"
       }
     }
   }'
 ```
 
-### Debug MCP Protocol
-
-```typescript
-// In route.ts aggiungi logging
-server.onRequest((request) => {
-  console.log('📨 MCP Request:', JSON.stringify(request, null, 2));
-});
-
-server.onNotification((notification) => {
-  console.log('📢 MCP Notification:', notification);
-});
-```
+---
 
 ## 📚 References
 
@@ -501,5 +522,4 @@ Entrambi i transport condividono:
 ---
 
 **Status:** ✅ Production ready
-**Version:** 1.1.0 (Added HTTP Transport support)
-
+**Version:** 2.0.0 (Hybrid Search + Unified Tools)

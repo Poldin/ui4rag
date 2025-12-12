@@ -12,7 +12,7 @@ import {
 import { createClient } from '@supabase/supabase-js';
 import { Database } from '../../../lib/database_types';
 import * as bcrypt from 'bcryptjs';
-import { RAGStorage, type RAGStorageConfig } from '../../../lib/ai-sdk/rag-storage';
+import { RAGStorage, type RAGStorageConfig, type SearchMode } from '../../../lib/ai-sdk/rag-storage';
 import { createEmbeddingConfig } from '../../../lib/ai-sdk/embeddings';
 import { randomUUID } from 'node:crypto';
 
@@ -263,59 +263,66 @@ function createRAGStorage(config: any): RAGStorage {
 
 /**
  * Definizione tools riutilizzabile per SSE e HTTP transport
+ * Tools unificati con Hybrid Search
  */
 function getToolsDefinition() {
   return [
     {
-      name: 'search_docs_rag',
-      description: 'Semantic search using vector embeddings (RAG). Use this FIRST to identify relevant documents. Returns most relevant chunks ranked by similarity score.',
+      name: 'search',
+      description: `Primary search tool for the knowledge base. Combines semantic understanding with exact keyword matching for best results.
+
+Use mode="hybrid" (default) for most queries - it finds both conceptually similar content AND exact matches.
+Use mode="semantic" when searching for concepts, paraphrases, or when the exact wording is unknown.
+Use mode="keyword" when searching for specific terms, codes, names, or exact phrases.
+
+Returns chunks with relevance scores (semantic_score, keyword_score, combined_score) and match_type indicating how the result was found.`,
       inputSchema: {
         type: 'object',
         properties: {
           query: {
             type: 'string',
-            description: 'The search query',
+            description: 'The search query - can be a question, keywords, or concept',
           },
           limit: {
             type: 'number',
             description: 'Maximum number of results (default: 5)',
             default: 5,
           },
+          mode: {
+            type: 'string',
+            enum: ['hybrid', 'semantic', 'keyword'],
+            description: 'Search mode: hybrid (default, best for most queries), semantic (conceptual), keyword (exact terms)',
+            default: 'hybrid',
+          },
         },
         required: ['query'],
       },
     },
     {
-      name: 'search_docs_keyword',
-      description: 'Advanced keyword search with context window using PostgreSQL Full-Text Search. Use this AFTER RAG search to explore specific documents in detail. Returns exact keyword matches with surrounding context.',
+      name: 'get_context',
+      description: `Retrieves surrounding context for a specific search result. Use this when a search result seems relevant but you need more context to fully understand or answer the user's question.
+
+The window parameter controls how many chunks before and after to retrieve (default: 2).
+Returns the target chunk plus adjacent chunks from the same document, ordered by position.`,
       inputSchema: {
         type: 'object',
         properties: {
-          keywords: {
+          chunkId: {
             type: 'string',
-            description: 'Keywords or phrase to search for',
+            description: 'The UUID of the chunk to expand (from search results)',
           },
-          sourceId: {
-            type: 'string',
-            description: 'Optional: Limit search to specific document (from RAG results)',
-          },
-          contextLines: {
+          window: {
             type: 'number',
-            description: 'Number of lines of context around each match (default: 10, min: 10)',
-            default: 10,
-          },
-          limit: {
-            type: 'number',
-            description: 'Maximum number of matches to return (default: 20)',
-            default: 20,
+            description: 'Number of chunks before and after to retrieve (default: 2)',
+            default: 2,
           },
         },
-        required: ['keywords'],
+        required: ['chunkId'],
       },
     },
     {
       name: 'get_document',
-      description: 'Get a full document by its source ID, including all chunks.',
+      description: 'Get a full document by its source ID, including all chunks. Use this when you need the complete document content.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -329,7 +336,7 @@ function getToolsDefinition() {
     },
     {
       name: 'list_sources',
-      description: 'List all available sources in the knowledge base with pagination.',
+      description: 'List all available sources in the knowledge base with pagination. Use this to explore what documents are available.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -389,8 +396,12 @@ async function executeTool(
 
     ragStorage = createRAGStorage(config);
     switch (name) {
-      case 'search_docs_rag': {
-        const { query, limit = 5 } = args as { query: string; limit?: number };
+      case 'search': {
+        const { query, limit = 5, mode = 'hybrid' } = args as { 
+          query: string; 
+          limit?: number;
+          mode?: SearchMode;
+        };
         
         if (!query) {
           throw new McpError(
@@ -399,7 +410,32 @@ async function executeTool(
           );
         }
 
-        const results = await ragStorage.search(query, limit, 0);
+        // Valida mode
+        const validModes: SearchMode[] = ['hybrid', 'semantic', 'keyword'];
+        const searchMode = validModes.includes(mode as SearchMode) ? mode as SearchMode : 'hybrid';
+
+        const results = await ragStorage.unifiedSearch(query, {
+          mode: searchMode,
+          limit,
+        });
+
+        // Se nessun risultato con score decente, ritorna messaggio chiaro
+        if (results.length === 0) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  query,
+                  mode: searchMode,
+                  count: 0,
+                  message: 'No relevant results found. Try rephrasing your query or using a different search mode.',
+                  results: [],
+                }, null, 2),
+              },
+            ],
+          };
+        }
 
         return {
           content: [
@@ -407,15 +443,20 @@ async function executeTool(
               type: 'text',
               text: JSON.stringify({
                 query,
+                mode: searchMode,
                 count: results.length,
                 results: results.map((r) => ({
+                  id: r.chunkId,
                   sourceId: r.sourceId,
                   sourceTitle: r.sourceTitle,
                   sourceType: r.sourceType,
                   content: r.chunkContent,
-                  similarity: r.similarity,
                   chunkIndex: r.chunkIndex,
                   chunkTotal: r.chunkTotal,
+                  semanticScore: r.semanticScore,
+                  keywordScore: r.keywordScore,
+                  combinedScore: r.combinedScore,
+                  matchType: r.matchType,
                   metadata: r.metadata,
                 })),
               }, null, 2),
@@ -424,50 +465,43 @@ async function executeTool(
         };
       }
 
-      case 'search_docs_keyword': {
-        const { keywords, sourceId, contextLines = 10, limit = 20 } = args as {
-          keywords: string;
-          sourceId?: string;
-          contextLines?: number;
-          limit?: number;
-        };
+      case 'get_context': {
+        const { chunkId, window = 2 } = args as { chunkId: string; window?: number };
         
-        if (!keywords) {
+        if (!chunkId) {
           throw new McpError(
             ErrorCode.InvalidParams,
-            'Keywords parameter is required'
+            'chunkId parameter is required'
           );
         }
 
-        // Enforce minimum context lines
-        const adjustedContextLines = Math.max(10, contextLines);
+        const chunks = await ragStorage.getChunkWithContext(chunkId, window);
 
-        const results = await ragStorage.keywordSearch(keywords, {
-          sourceId,
-          contextLines: adjustedContextLines,
-          limit,
-        });
+        // Concatena i contenuti per una lettura più fluida
+        const concatenatedContent = chunks
+          .map((c) => c.chunkContent)
+          .join('\n\n---\n\n');
 
         return {
           content: [
             {
               type: 'text',
               text: JSON.stringify({
-                query: keywords,
-                sourceId: sourceId || 'all',
-                contextLines: adjustedContextLines,
-                count: results.length,
-                matches: results.map((r) => ({
-                  sourceId: r.sourceId,
-                  sourceTitle: r.sourceTitle,
-                  sourceType: r.sourceType,
-                  chunkId: r.chunkId,
-                  matchPosition: r.matchPosition,
-                  context: r.context,
-                  rank: r.rank,
-                  chunkIndex: r.chunkIndex,
-                  chunkTotal: r.chunkTotal,
+                targetChunkId: chunkId,
+                window,
+                sourceId: chunks[0]?.sourceId,
+                sourceTitle: chunks[0]?.sourceTitle,
+                sourceType: chunks[0]?.sourceType,
+                chunksRetrieved: chunks.length,
+                chunks: chunks.map((c) => ({
+                  id: c.chunkId,
+                  content: c.chunkContent,
+                  chunkIndex: c.chunkIndex,
+                  chunkTotal: c.chunkTotal,
+                  isTarget: c.isTarget,
+                  relativePosition: c.relativePosition,
                 })),
+                concatenatedContent,
               }, null, 2),
             },
           ],

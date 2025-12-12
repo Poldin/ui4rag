@@ -35,6 +35,45 @@ export interface SearchResult {
 }
 
 /**
+ * Risultato hybrid search (semantic + keyword combinati)
+ */
+export interface HybridSearchResult {
+  chunkId: string;
+  sourceId: string;
+  chunkContent: string;
+  sourceTitle: string;
+  sourceType: string;
+  chunkIndex: number;
+  chunkTotal: number;
+  metadata: any;
+  semanticScore: number;
+  keywordScore: number;
+  combinedScore: number;
+  matchType: 'both' | 'semantic_only' | 'keyword_only';
+}
+
+/**
+ * Chunk con contesto (chunks adiacenti)
+ */
+export interface ChunkWithContext {
+  chunkId: string;
+  sourceId: string;
+  chunkContent: string;
+  sourceTitle: string;
+  sourceType: string;
+  chunkIndex: number;
+  chunkTotal: number;
+  metadata: any;
+  isTarget: boolean;
+  relativePosition: number;
+}
+
+/**
+ * Modalità di ricerca
+ */
+export type SearchMode = 'hybrid' | 'semantic' | 'keyword';
+
+/**
  * Classe per gestire storage e retrieval RAG
  */
 export class RAGStorage {
@@ -507,6 +546,181 @@ export class RAGStorage {
         chunkTotal: row.chunk_total,
       };
     });
+  }
+
+  /**
+   * Hybrid Search: combina semantic search + keyword search
+   * Chiama la function Postgres hybrid_search
+   */
+  async hybridSearch(
+    query: string,
+    options: {
+      limit?: number;
+      semanticWeight?: number;
+      keywordWeight?: number;
+      similarityThreshold?: number;
+    } = {}
+  ): Promise<HybridSearchResult[]> {
+    const pool = this.getPool();
+    const {
+      limit = 5,
+      semanticWeight = 0.7,
+      keywordWeight = 0.3,
+      similarityThreshold = 0.5,
+    } = options;
+
+    try {
+      // 1. Genera embedding della query
+      const { embedding } = await generateEmbedding(
+        query,
+        this.config.embeddingConfig
+      );
+      const vectorString = arrayToVectorString(embedding);
+
+      // 2. Chiama la function Postgres hybrid_search
+      const functionName = `${this.config.chunksTableName}_hybrid_search`;
+      const result = await pool.query(
+        `SELECT * FROM ${functionName}($1, $2::vector, $3, $4, $5, $6)`,
+        [query, vectorString, limit, semanticWeight, keywordWeight, similarityThreshold]
+      );
+
+      // 3. Formatta risultati
+      return result.rows.map((row) => ({
+        chunkId: row.id,
+        sourceId: row.source_id,
+        chunkContent: row.content,
+        sourceTitle: row.source_title,
+        sourceType: row.source_type,
+        chunkIndex: row.chunk_index,
+        chunkTotal: row.chunk_total,
+        metadata: {
+          ...row.metadata,
+          ...row.source_metadata,
+        },
+        semanticScore: parseFloat((row.semantic_score * 100).toFixed(2)),
+        keywordScore: parseFloat((row.keyword_score * 100).toFixed(2)),
+        combinedScore: parseFloat((row.combined_score * 100).toFixed(2)),
+        matchType: row.match_type as 'both' | 'semantic_only' | 'keyword_only',
+      }));
+    } catch (error: any) {
+      // Gestione errori specifica per function non trovata
+      if (error.code === '42883') {
+        throw new Error(
+          `Hybrid search function not found. Please run the database setup script to create the required functions. ` +
+          `Expected function: ${this.config.chunksTableName}_hybrid_search`
+        );
+      }
+      throw new Error(`Hybrid search failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Unified search: seleziona automaticamente la modalità di ricerca
+   */
+  async unifiedSearch(
+    query: string,
+    options: {
+      mode?: SearchMode;
+      limit?: number;
+      semanticWeight?: number;
+      keywordWeight?: number;
+      similarityThreshold?: number;
+    } = {}
+  ): Promise<HybridSearchResult[]> {
+    const { mode = 'hybrid', limit = 5, ...hybridOptions } = options;
+
+    switch (mode) {
+      case 'hybrid':
+        return this.hybridSearch(query, { limit, ...hybridOptions });
+
+      case 'semantic': {
+        // Usa search esistente e converte al formato HybridSearchResult
+        const results = await this.search(query, limit);
+        return results.map((r) => ({
+          chunkId: r.chunkId,
+          sourceId: r.sourceId,
+          chunkContent: r.chunkContent,
+          sourceTitle: r.sourceTitle,
+          sourceType: r.sourceType,
+          chunkIndex: r.chunkIndex,
+          chunkTotal: r.chunkTotal,
+          metadata: r.metadata,
+          semanticScore: r.similarity,
+          keywordScore: 0,
+          combinedScore: r.similarity,
+          matchType: 'semantic_only' as const,
+        }));
+      }
+
+      case 'keyword': {
+        // Usa keywordSearch esistente e converte al formato HybridSearchResult
+        const results = await this.keywordSearch(query, { limit });
+        return results.map((r) => ({
+          chunkId: r.chunkId,
+          sourceId: r.sourceId,
+          chunkContent: r.chunkContent,
+          sourceTitle: r.sourceTitle,
+          sourceType: r.sourceType,
+          chunkIndex: r.chunkIndex,
+          chunkTotal: r.chunkTotal,
+          metadata: {},
+          semanticScore: 0,
+          keywordScore: r.rank,
+          combinedScore: r.rank,
+          matchType: 'keyword_only' as const,
+        }));
+      }
+
+      default:
+        throw new Error(`Invalid search mode: ${mode}`);
+    }
+  }
+
+  /**
+   * Get chunk with context: recupera un chunk con i chunks adiacenti
+   * Chiama la function Postgres get_chunk_with_context
+   */
+  async getChunkWithContext(
+    chunkId: string,
+    windowSize: number = 2
+  ): Promise<ChunkWithContext[]> {
+    const pool = this.getPool();
+
+    try {
+      const functionName = `${this.config.chunksTableName}_get_chunk_with_context`;
+      const result = await pool.query(
+        `SELECT * FROM ${functionName}($1::uuid, $2)`,
+        [chunkId, windowSize]
+      );
+
+      if (result.rows.length === 0) {
+        throw new Error(`Chunk ${chunkId} not found`);
+      }
+
+      return result.rows.map((row) => ({
+        chunkId: row.id,
+        sourceId: row.source_id,
+        chunkContent: row.content,
+        sourceTitle: row.source_title,
+        sourceType: row.source_type,
+        chunkIndex: row.chunk_index,
+        chunkTotal: row.chunk_total,
+        metadata: row.metadata || {},
+        isTarget: row.is_target,
+        relativePosition: row.relative_position,
+      }));
+    } catch (error: any) {
+      if (error.code === '42883') {
+        throw new Error(
+          `Get context function not found. Please run the database setup script to create the required functions. ` +
+          `Expected function: ${this.config.chunksTableName}_get_chunk_with_context`
+        );
+      }
+      if (error.message?.includes('Chunk not found')) {
+        throw error;
+      }
+      throw new Error(`Get chunk with context failed: ${error.message}`);
+    }
   }
 }
 

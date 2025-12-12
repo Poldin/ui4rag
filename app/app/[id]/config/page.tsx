@@ -152,14 +152,18 @@ CREATE INDEX IF NOT EXISTS ${sourcesTableName}_source_type_idx
 CREATE INDEX IF NOT EXISTS ${sourcesTableName}_created_at_idx 
   ON public.${sourcesTableName}(created_at DESC);
 
+CREATE INDEX IF NOT EXISTS ${sourcesTableName}_metadata_idx 
+  ON public.${sourcesTableName} USING GIN(metadata);
+
 -- ============================================
--- TABLE 2: CHUNKS (chunks embedded)
+-- TABLE 2: CHUNKS (chunks embedded + FTS)
 -- ============================================
 CREATE TABLE IF NOT EXISTS public.${chunksTableName} (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   source_id UUID NOT NULL REFERENCES public.${sourcesTableName}(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
   embedding vector(${embeddingDimensions}),
+  fts tsvector GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED,
   chunk_index INTEGER NOT NULL,
   chunk_total INTEGER NOT NULL,
   metadata JSONB DEFAULT '{}'::jsonb,
@@ -175,6 +179,13 @@ CREATE INDEX IF NOT EXISTS ${chunksTableName}_embedding_idx
   USING ivfflat (embedding vector_cosine_ops)
   WITH (lists = 100);
 
+-- Full-Text Search index
+CREATE INDEX IF NOT EXISTS ${chunksTableName}_fts_idx 
+  ON public.${chunksTableName} USING GIN(fts);
+
+CREATE INDEX IF NOT EXISTS ${chunksTableName}_source_chunk_idx 
+  ON public.${chunksTableName}(source_id, chunk_index);
+
 -- Trigger for updated_at on SOURCES table
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -188,7 +199,102 @@ DROP TRIGGER IF EXISTS update_${sourcesTableName}_updated_at ON public.${sources
 CREATE TRIGGER update_${sourcesTableName}_updated_at 
   BEFORE UPDATE ON public.${sourcesTableName} 
   FOR EACH ROW 
-  EXECUTE FUNCTION update_updated_at_column();`;
+  EXECUTE FUNCTION update_updated_at_column();
+
+-- ============================================
+-- FUNCTION: hybrid_search (semantic + keyword)
+-- ============================================
+CREATE OR REPLACE FUNCTION ${chunksTableName}_hybrid_search(
+  query_text TEXT,
+  query_embedding vector(${embeddingDimensions}),
+  match_count INT DEFAULT 5,
+  semantic_weight FLOAT DEFAULT 0.7,
+  keyword_weight FLOAT DEFAULT 0.3,
+  similarity_threshold FLOAT DEFAULT 0.5
+)
+RETURNS TABLE (
+  id UUID, source_id UUID, content TEXT, chunk_index INT, chunk_total INT,
+  metadata JSONB, source_title TEXT, source_type TEXT, source_metadata JSONB,
+  semantic_score FLOAT, keyword_score FLOAT, combined_score FLOAT, match_type TEXT
+) AS $$
+DECLARE expanded_count INT := match_count * 3;
+BEGIN
+  RETURN QUERY
+  WITH 
+  semantic AS (
+    SELECT c.id, c.source_id, c.content, c.chunk_index, c.chunk_total, c.metadata,
+      s.title as source_title, s.source_type, s.metadata as source_metadata,
+      1 - (c.embedding <=> query_embedding) as score
+    FROM public.${chunksTableName} c
+    JOIN public.${sourcesTableName} s ON c.source_id = s.id
+    WHERE c.embedding IS NOT NULL
+    ORDER BY c.embedding <=> query_embedding LIMIT expanded_count
+  ),
+  keyword AS (
+    SELECT c.id, c.source_id, c.content, c.chunk_index, c.chunk_total, c.metadata,
+      s.title as source_title, s.source_type, s.metadata as source_metadata,
+      ts_rank_cd(c.fts, plainto_tsquery('simple', query_text)) as score
+    FROM public.${chunksTableName} c
+    JOIN public.${sourcesTableName} s ON c.source_id = s.id
+    WHERE c.fts @@ plainto_tsquery('simple', query_text)
+    ORDER BY ts_rank_cd(c.fts, plainto_tsquery('simple', query_text)) DESC LIMIT expanded_count
+  ),
+  semantic_normalized AS (
+    SELECT *, score as normalized_score FROM semantic WHERE score >= similarity_threshold
+  ),
+  keyword_normalized AS (
+    SELECT *, CASE WHEN (SELECT MAX(score) FROM keyword) > 0 
+      THEN score / (SELECT MAX(score) FROM keyword) ELSE 0 END as normalized_score
+    FROM keyword
+  ),
+  combined AS (
+    SELECT COALESCE(s.id, k.id) as id, COALESCE(s.source_id, k.source_id) as source_id,
+      COALESCE(s.content, k.content) as content, COALESCE(s.chunk_index, k.chunk_index) as chunk_index,
+      COALESCE(s.chunk_total, k.chunk_total) as chunk_total, COALESCE(s.metadata, k.metadata) as metadata,
+      COALESCE(s.source_title, k.source_title) as source_title, COALESCE(s.source_type, k.source_type) as source_type,
+      COALESCE(s.source_metadata, k.source_metadata) as source_metadata,
+      COALESCE(s.normalized_score, 0) as sem_score, COALESCE(k.normalized_score, 0) as kw_score,
+      CASE WHEN s.id IS NOT NULL AND k.id IS NOT NULL THEN 'both'
+           WHEN s.id IS NOT NULL THEN 'semantic_only' ELSE 'keyword_only' END as match_type
+    FROM semantic_normalized s FULL OUTER JOIN keyword_normalized k ON s.id = k.id
+  )
+  SELECT combined.id, combined.source_id, combined.content, combined.chunk_index, combined.chunk_total,
+    combined.metadata, combined.source_title, combined.source_type, combined.source_metadata,
+    combined.sem_score::FLOAT, combined.kw_score::FLOAT,
+    ((combined.sem_score * semantic_weight) + (combined.kw_score * keyword_weight))::FLOAT,
+    combined.match_type
+  FROM combined
+  WHERE (combined.sem_score * semantic_weight) + (combined.kw_score * keyword_weight) > 0
+  ORDER BY combined_score DESC LIMIT match_count;
+END;
+$$ LANGUAGE plpgsql;
+
+-- ============================================
+-- FUNCTION: get_chunk_with_context
+-- ============================================
+CREATE OR REPLACE FUNCTION ${chunksTableName}_get_chunk_with_context(
+  target_chunk_id UUID, window_size INT DEFAULT 2
+)
+RETURNS TABLE (
+  id UUID, source_id UUID, content TEXT, chunk_index INT, chunk_total INT,
+  metadata JSONB, source_title TEXT, source_type TEXT, is_target BOOLEAN, relative_position INT
+) AS $$
+DECLARE target_source_id UUID; target_index INT;
+BEGIN
+  SELECT c.source_id, c.chunk_index INTO target_source_id, target_index
+  FROM public.${chunksTableName} c WHERE c.id = target_chunk_id;
+  IF target_source_id IS NULL THEN RAISE EXCEPTION 'Chunk not found: %', target_chunk_id; END IF;
+  RETURN QUERY
+  SELECT c.id, c.source_id, c.content, c.chunk_index, c.chunk_total, c.metadata,
+    s.title as source_title, s.source_type, c.chunk_index = target_index as is_target,
+    c.chunk_index - target_index as relative_position
+  FROM public.${chunksTableName} c
+  JOIN public.${sourcesTableName} s ON c.source_id = s.id
+  WHERE c.source_id = target_source_id
+    AND c.chunk_index BETWEEN (target_index - window_size) AND (target_index + window_size)
+  ORDER BY c.chunk_index;
+END;
+$$ LANGUAGE plpgsql;`;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(sqlCode);
@@ -602,67 +708,6 @@ CREATE TRIGGER update_${sourcesTableName}_updated_at
                         }}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
                       />
-                    </div>
-                  </div>
-
-                  {/* Auto Setup Button */}
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-start justify-between mb-2">
-                      <div className="flex-1">
-                        <h3 className="text-sm font-medium text-gray-900 mb-1">🚀 Automatic Setup</h3>
-                        <p className="text-xs text-gray-600">
-                          {tablesVerified 
-                            ? "Tables are configured. You can verify them again if needed."
-                            : "Click the button to automatically create the 2 tables (sources + chunks) in your database."}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 mt-3">
-                      {tablesVerified ? (
-                        <div className="flex items-center gap-2 px-4 py-2 bg-gray-100 border border-gray-300 rounded-md">
-                          <CheckCircle2 className="w-4 h-4 text-gray-900" />
-                          <span className="text-sm font-medium text-gray-900">Tables Configured</span>
-                        </div>
-                      ) : (
-                        <button
-                          onClick={handleAutoSetup}
-                          disabled={setupInProgress || !connectionString || !sourcesTableName || !chunksTableName}
-                          className="flex items-center justify-center gap-2 w-fit px-4 py-2 bg-gray-900 text-white text-sm rounded-md hover:bg-gray-800 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed font-medium"
-                        >
-                          {setupInProgress && <Loader2 className="w-4 h-4 animate-spin" />}
-                          {setupInProgress ? "creating tables..." : "create tables automatically"}
-                        </button>
-                      )}
-                      
-                      <button
-                        onClick={handleVerifyTables}
-                        disabled={verifyingTables || !connectionString || !sourcesTableName || !chunksTableName}
-                        className="flex items-center justify-center gap-2 px-4 py-2 bg-white border border-gray-300 text-gray-900 text-sm rounded-md hover:bg-gray-50 transition-colors disabled:bg-gray-100 disabled:cursor-not-allowed font-medium"
-                      >
-                        {verifyingTables && <Loader2 className="w-4 h-4 animate-spin" />}
-                        {verifyingTables ? "verifying..." : "verify tables"}
-                      </button>
-                    </div>
-                    
-                    {/* Messages */}
-                    <div className="mt-3 space-y-2">
-                      {setupStatus === "success" && (
-                        <div className="flex items-center gap-1.5 text-gray-900 bg-green-50 border border-green-200 rounded-md px-3 py-2">
-                          <CheckCircle2 className="w-4 h-4 text-green-600" />
-                          <span className="text-xs font-medium">{setupMessage}</span>
-                        </div>
-                      )}
-                      {setupStatus === "error" && (
-                        <div className="flex items-center gap-1.5 text-gray-900 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-                          <AlertCircle className="w-4 h-4 text-red-600" />
-                          <span className="text-xs font-medium">{setupMessage}</span>
-                        </div>
-                      )}
-                      {verifyMessage && (
-                        <div className="flex items-center gap-1.5 text-gray-900 bg-blue-50 border border-blue-200 rounded-md px-3 py-2">
-                          <span className="text-xs font-medium">{verifyMessage}</span>
-                        </div>
-                      )}
                     </div>
                   </div>
 
