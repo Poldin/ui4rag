@@ -8,7 +8,8 @@ import {
   CreditDepletedData,
   ToolStatusChangedData
 } from './types';
-import { syncUserFrom1Sub } from './user-sync';
+import { syncUserFrom1Sub, getSupabaseUserIdByOneSub } from './user-sync';
+import { upsertSubscription, updateSubscriptionPlan, deactivateSubscription } from './subscription-db';
 
 /**
  * Handlers for each webhook event type.
@@ -28,27 +29,38 @@ export async function handleSubscriptionActivated(
   });
 
   try {
-    // 1. Crea o recupera l'utente Supabase
-    if (data.userEmail) {
-      const supabaseUserId = await syncUserFrom1Sub(
-        data.oneSubUserId,
-        data.userEmail
-      );
-      
-      console.log('✅ User synced:', {
-        oneSubUserId: data.oneSubUserId,
-        supabaseUserId,
-        email: data.userEmail,
-      });
-    } else {
+    if (!data.userEmail) {
       console.warn('⚠️ No email provided in webhook data');
+      return;
     }
 
-    // 2. TODO: Additional logic
-    // - Send welcome email
-    // - Set up user resources
-    // - Grant access to specific features based on planId
+    // 1. Crea o recupera l'utente Supabase
+    const supabaseUserId = await syncUserFrom1Sub(
+      data.oneSubUserId,
+      data.userEmail
+    );
     
+    console.log('✅ User synced:', {
+      oneSubUserId: data.oneSubUserId,
+      supabaseUserId,
+      email: data.userEmail,
+    });
+
+    // 2. Crea/aggiorna record nella tabella subscriptions
+    await upsertSubscription(
+      supabaseUserId,
+      data.planId,
+      true // is_active
+    );
+
+    console.log('✅ Subscription created/updated:', {
+      oneSubUserId: data.oneSubUserId,
+      plan: data.planId,
+      status: data.status,
+    });
+
+    // 3. TODO: Additional logic
+    // - Send welcome email
     // if (data.status === 'trialing') {
     //   await sendTrialStartedEmail(data.userEmail);
     // } else {
@@ -74,28 +86,38 @@ export async function handleSubscriptionUpdated(
     previousStatus: data.previousStatus,
   });
 
-  // TODO: Implement your logic
-  // - Update user's plan features
-  // - Adjust usage limits
-  // - Clear subscription cache
-  // - Log plan changes
-  
-  // Handle plan changes
-  if (data.previousPlanId && data.previousPlanId !== data.planId) {
-    console.log(`Plan changed: ${data.previousPlanId} → ${data.planId}`);
-    // await updateUserPlan(data.oneSubUserId, data.planId, data.previousPlanId);
-  }
-  
-  // Handle trial conversion
-  if (data.previousStatus === 'trialing' && data.status === 'active') {
-    console.log('Trial converted to paid subscription');
-    // await sendTrialConvertedEmail(data.userEmail);
-  }
-  
-  // Handle renewals
-  if (!data.previousPlanId && data.status === 'active') {
-    console.log('Subscription renewed');
-    // await logRenewal(data.oneSubUserId);
+  try {
+    // Handle plan changes (upgrade/downgrade)
+    if (data.previousPlanId && data.previousPlanId !== data.planId) {
+      console.log(`📦 Plan changed: ${data.previousPlanId} → ${data.planId}`);
+      
+      // Trova l'utente Supabase dal oneSubUserId
+      const supabaseUserId = await getSupabaseUserIdByOneSub(data.oneSubUserId);
+      
+      if (supabaseUserId) {
+        await updateSubscriptionPlan(supabaseUserId, data.planId);
+      }
+      
+      console.log('✅ Plan updated in database');
+      
+      // TODO: Send email notification
+      // await sendPlanChangeEmail(data.userEmail, data.planId, data.previousPlanId);
+    }
+    
+    // Handle trial conversion
+    if (data.previousStatus === 'trialing' && data.status === 'active') {
+      console.log('✨ Trial converted to paid subscription');
+      // TODO: await sendTrialConvertedEmail(data.userEmail);
+    }
+    
+    // Handle renewals
+    if (!data.previousPlanId && data.status === 'active') {
+      console.log('🔄 Subscription renewed');
+    }
+    
+  } catch (error) {
+    console.error('❌ Error handling subscription updated:', error);
+    throw error;
   }
 }
 
@@ -111,28 +133,38 @@ export async function handleSubscriptionCanceled(
     effectiveDate: data.effectiveDate,
   });
 
-  // TODO: Implement your logic
-  // - Revoke user access (immediately or at period end)
-  // - Send cancellation email/survey
-  // - Archive user data
-  // - Clear subscription cache
-  
-  const now = new Date();
-  const effectiveDate = new Date(data.effectiveDate);
-  
-  if (effectiveDate <= now) {
-    console.log('Access revoked immediately');
-    // await revokeUserAccess(data.oneSubUserId);
-  } else {
-    console.log('Access will be revoked at:', effectiveDate);
-    // await scheduleAccessRevocation(data.oneSubUserId, effectiveDate);
-  }
-  
-  // Send appropriate email based on cancellation reason
-  if (data.cancellationReason === 'user_requested') {
-    // await sendCancellationConfirmationEmail(data.userEmail, effectiveDate);
-  } else if (data.cancellationReason === 'payment_failed') {
-    // await sendPaymentFailedEmail(data.userEmail);
+  try {
+    const now = new Date();
+    const effectiveDate = new Date(data.effectiveDate);
+    
+    if (effectiveDate <= now) {
+      // Disattiva immediatamente
+      console.log('🚫 Revoking access immediately');
+      
+      const supabaseUserId = await getSupabaseUserIdByOneSub(data.oneSubUserId);
+      
+      if (supabaseUserId) {
+        await deactivateSubscription(supabaseUserId);
+      }
+      
+      console.log('✅ Subscription deactivated');
+    } else {
+      // Disattiva alla fine del periodo
+      console.log('⏰ Access will be revoked at:', effectiveDate);
+      // TODO: Schedule deactivation
+      // await scheduleDeactivation(data.oneSubUserId, effectiveDate);
+    }
+    
+    // Send email based on cancellation reason
+    if (data.cancellationReason === 'user_requested') {
+      // TODO: await sendCancellationConfirmationEmail(data.userEmail, effectiveDate);
+    } else if (data.cancellationReason === 'payment_failed') {
+      // TODO: await sendPaymentFailedEmail(data.userEmail);
+    }
+    
+  } catch (error) {
+    console.error('❌ Error handling subscription canceled:', error);
+    throw error;
   }
 }
 
