@@ -14,7 +14,8 @@ export type WebhookEventType =
   | 'purchase.completed'
   | 'user.credit_low'
   | 'user.credit_depleted'
-  | 'tool.status_changed';
+  | 'tool.status_changed'
+  | 'entitlement.revoked';
 
 // Base event data structure
 interface BaseEventData {
@@ -80,6 +81,13 @@ export interface ToolStatusChangedData {
   toolStatus: boolean;
 }
 
+// Entitlement Event
+export interface EntitlementRevokedData extends BaseEventData {
+  reason: 'subscription_ended' | 'user_revoked' | 'admin_revoked' | 'fraud' | 'tos_violation' | 'payment_failed';
+  revokedAt: string;
+  status: 'canceled';
+}
+
 // Union type for all event data
 export type EventData =
   | SubscriptionActivatedData
@@ -88,5 +96,6 @@ export type EventData =
   | PurchaseCompletedData
   | CreditLowData
   | CreditDepletedData
-  | ToolStatusChangedData;
+  | ToolStatusChangedData
+  | EntitlementRevokedData;
 

@@ -9,6 +9,7 @@ import {
   handleCreditLow,
   handleCreditDepleted,
   handleToolStatusChanged,
+  handleEntitlementRevoked,
 } from '@/lib/1sub/webhook-handlers';
 
 
@@ -131,6 +132,10 @@ async function processWebhookAsync(event: WebhookEvent) {
         
       case 'tool.status_changed':
         await handleToolStatusChanged(event, event.data as any);
+        break;
+        
+      case 'entitlement.revoked':
+        await handleEntitlementRevoked(event, event.data as any);
         break;
         
       default:

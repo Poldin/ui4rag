@@ -6,7 +6,8 @@ import {
   PurchaseCompletedData,
   CreditLowData,
   CreditDepletedData,
-  ToolStatusChangedData
+  ToolStatusChangedData,
+  EntitlementRevokedData
 } from './types';
 import { syncUserFrom1Sub, getSupabaseUserIdByOneSub } from './user-sync';
 import { upsertSubscription, updateSubscriptionPlan, deactivateSubscription } from './subscription-db';
@@ -221,6 +222,45 @@ export async function handleToolStatusChanged(
     //   type: 'info',
     //   message: 'Service is back online!',
     // });
+  }
+}
+
+export async function handleEntitlementRevoked(
+  event: WebhookEvent,
+  data: EntitlementRevokedData
+) {
+  console.log('🚫 Entitlement Revoked:', {
+    userId: data.oneSubUserId,
+    email: data.userEmail,
+    reason: data.reason,
+    revokedAt: data.revokedAt,
+  });
+
+  try {
+    // Revoca immediata dell'accesso
+    const supabaseUserId = await getSupabaseUserIdByOneSub(data.oneSubUserId);
+    
+    if (supabaseUserId) {
+      await deactivateSubscription(supabaseUserId);
+      console.log('✅ User access revoked immediately');
+    } else {
+      console.warn('⚠️ User not found in database');
+    }
+    
+    // Log della motivazione per analisi
+    if (data.reason === 'fraud' || data.reason === 'tos_violation') {
+      console.warn('🔴 SECURITY EVENT:', {
+        userId: data.oneSubUserId,
+        reason: data.reason,
+        timestamp: data.revokedAt,
+      });
+      // TODO: Alert security team
+      // await alertSecurity({ userId: data.oneSubUserId, reason: data.reason });
+    }
+    
+  } catch (error) {
+    console.error('❌ Error handling entitlement revoked:', error);
+    throw error;
   }
 }
 
