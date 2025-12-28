@@ -4,7 +4,7 @@ import { createHmac } from 'crypto';
  * Verifies the HMAC-SHA256 signature of a 1Sub webhook payload
  * 
  * @param payload - The raw request body as a string
- * @param signature - The '1sub-signature' header value (format: "t=timestamp,v1=hash")
+ * @param signature - The 'X-1sub' header value (format: "t=timestamp,v1=hash")
  * @param secret - Your 1SUB_WEBHOOK_SECRET
  * @returns true if signature is valid, false otherwise
  */
