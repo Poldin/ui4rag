@@ -34,10 +34,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Get signature from header
-    const signature = request.headers.get('X-1sub');
+    const signature = request.headers.get('x-1sub-signature');
     
     if (!signature) {
-      console.error('Missing X-1sub header');
+      console.error('Missing x-1sub-signature header');
       return NextResponse.json(
         { error: 'Missing signature' },
         { status: 401 }
