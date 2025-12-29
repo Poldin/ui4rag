@@ -85,7 +85,13 @@ export async function POST(request: NextRequest) {
 
     // Process event asynchronously (don't await - respond immediately)
     processWebhookAsync(event).catch(error => {
-      console.error('Error processing webhook:', error);
+      console.error('❌❌❌ CRITICAL ERROR processing webhook:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        eventId: event.id,
+        eventType: event.type,
+      });
     });
 
     // Acknowledge receipt immediately
@@ -104,47 +110,75 @@ export async function POST(request: NextRequest) {
  * Process webhook event asynchronously
  */
 async function processWebhookAsync(event: WebhookEvent) {
+  const startTime = Date.now();
+  console.log(`⚙️ [PROCESS] Starting async processing for event ${event.id}`);
+  
   try {
+    console.log(`🎯 [PROCESS] Event type: ${event.type}`);
+    
     switch (event.type) {
       case 'subscription.activated':
+        console.log('📍 [PROCESS] Calling handleSubscriptionActivated...');
         await handleSubscriptionActivated(event, event.data as any);
+        console.log('✅ [PROCESS] handleSubscriptionActivated completed');
         break;
         
       case 'subscription.updated':
+        console.log('📍 [PROCESS] Calling handleSubscriptionUpdated...');
         await handleSubscriptionUpdated(event, event.data as any);
+        console.log('✅ [PROCESS] handleSubscriptionUpdated completed');
         break;
         
       case 'subscription.canceled':
+        console.log('📍 [PROCESS] Calling handleSubscriptionCanceled...');
         await handleSubscriptionCanceled(event, event.data as any);
+        console.log('✅ [PROCESS] handleSubscriptionCanceled completed');
         break;
         
       case 'purchase.completed':
+        console.log('📍 [PROCESS] Calling handlePurchaseCompleted...');
         await handlePurchaseCompleted(event, event.data as any);
+        console.log('✅ [PROCESS] handlePurchaseCompleted completed');
         break;
         
       case 'user.credit_low':
+        console.log('📍 [PROCESS] Calling handleCreditLow...');
         await handleCreditLow(event, event.data as any);
+        console.log('✅ [PROCESS] handleCreditLow completed');
         break;
         
       case 'user.credit_depleted':
+        console.log('📍 [PROCESS] Calling handleCreditDepleted...');
         await handleCreditDepleted(event, event.data as any);
+        console.log('✅ [PROCESS] handleCreditDepleted completed');
         break;
         
       case 'tool.status_changed':
+        console.log('📍 [PROCESS] Calling handleToolStatusChanged...');
         await handleToolStatusChanged(event, event.data as any);
+        console.log('✅ [PROCESS] handleToolStatusChanged completed');
         break;
         
       case 'entitlement.revoked':
+        console.log('📍 [PROCESS] Calling handleEntitlementRevoked...');
         await handleEntitlementRevoked(event, event.data as any);
+        console.log('✅ [PROCESS] handleEntitlementRevoked completed');
         break;
         
       default:
-        console.warn('Unknown event type:', event.type);
+        console.warn(`⚠️ [PROCESS] Unknown event type: ${event.type}`);
     }
     
-    console.log(`✅ Event ${event.id} processed successfully`);
-  } catch (error) {
-    console.error(`❌ Error processing event ${event.id}:`, error);
+    const duration = Date.now() - startTime;
+    console.log(`✅✅✅ [PROCESS COMPLETE] Event ${event.id} processed successfully in ${duration}ms`);
+  } catch (error: any) {
+    const duration = Date.now() - startTime;
+    console.error(`❌❌❌ [PROCESS FAILED] Error processing event ${event.id} after ${duration}ms:`, {
+      eventType: event.type,
+      errorName: error?.name,
+      errorMessage: error?.message,
+      errorStack: error?.stack
+    });
     throw error;
   }
 }

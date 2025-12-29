@@ -36,23 +36,27 @@ export async function handleSubscriptionActivated(
     }
 
     // 1. Crea o recupera l'utente Supabase
+    console.log('🚀 Starting user sync...');
     const supabaseUserId = await syncUserFrom1Sub(
       data.oneSubUserId,
       data.userEmail
     );
     
-    console.log('✅ User synced:', {
+    console.log('✅ User synced successfully:', {
       oneSubUserId: data.oneSubUserId,
-      supabaseUserId,
+      supabaseUserId: supabaseUserId,
       email: data.userEmail,
     });
 
     // 2. Crea/aggiorna record nella tabella subscriptions
-    await upsertSubscription(
+    console.log('💾 Creating/updating subscription in DB...');
+    const subscriptionData = await upsertSubscription(
       supabaseUserId,
       data.planId,
       true // is_active
     );
+    
+    console.log('💾 Subscription data saved:', subscriptionData);
 
     console.log('✅ Subscription created/updated:', {
       oneSubUserId: data.oneSubUserId,

@@ -30,26 +30,49 @@ export async function upsertSubscription(
   planId: string,
   isActive: boolean = true
 ) {
-  const supabase = getSupabaseAdmin();
+  console.log('💾 [DB] Starting upsert subscription:', {
+    userId: supabaseUserId,
+    plan: planId,
+    isActive
+  });
 
-  const { data, error } = await (supabase as any)
-    .from('subscriptions')
-    .upsert({
-      user_id: supabaseUserId,
-      plan: planId,
-      is_active: isActive,
-    }, {
-      onConflict: 'user_id',
-    })
-    .select()
-    .single();
+  try {
+    const supabase = getSupabaseAdmin();
 
-  if (error) {
-    console.error('Error upserting subscription:', error);
-    throw error;
+    console.log('💾 [DB] Executing upsert query...');
+    const { data, error } = await (supabase as any)
+      .from('subscriptions')
+      .upsert({
+        user_id: supabaseUserId,
+        plan: planId,
+        is_active: isActive,
+      }, {
+        onConflict: 'user_id',
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('❌ [DB] Error upserting subscription:', {
+        error,
+        code: error.code,
+        message: error.message,
+        details: error.details,
+        hint: error.hint
+      });
+      throw error;
+    }
+
+    console.log('✅ [DB] Subscription upserted successfully:', data);
+    return data;
+  } catch (err: any) {
+    console.error('❌❌❌ [DB] Exception in upsertSubscription:', {
+      message: err?.message,
+      name: err?.name,
+      stack: err?.stack
+    });
+    throw err;
   }
-
-  return data;
 }
 
 /**
