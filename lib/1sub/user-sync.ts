@@ -65,9 +65,13 @@ export async function syncUserFrom1Sub(
     // Se esiste già, gestisci l'errore e aggiorna i metadati
     console.log('➕ [STEP 2/3] Attempting to create user...');
     
+    // TENTATIVO 1: Con password auto-generata (richiesta da Supabase)
+    const tempPassword = `temp_${Math.random().toString(36).substring(7)}_${Date.now()}`;
+    
     const createPayload = {
       email: userEmail,
-      email_confirm: true, // Auto-confirm email
+      password: tempPassword,
+      email_confirm: true,
       user_metadata: {
         onesub_user_id: oneSubUserId,
         created_from: '1sub_webhook',
@@ -77,11 +81,36 @@ export async function syncUserFrom1Sub(
     
     console.log('📝 [STEP 2/3] Creating user with payload:', {
       email: userEmail,
+      hasPassword: true,
       email_confirm: true,
-      metadata_keys: Object.keys(createPayload.user_metadata)
+      metadata: createPayload.user_metadata
     });
+    console.log('⏰ [STEP 2/3] Calling createUser (timeout: 10s)...');
     
-    const { data: newUserData, error: createError } = await supabase.auth.admin.createUser(createPayload);
+    const createPromise = supabase.auth.admin.createUser(createPayload);
+    
+    // Timeout di 10 secondi per debug
+    const timeoutPromise = new Promise((_, reject) => 
+      setTimeout(() => reject(new Error('⏱️ createUser TIMEOUT after 10 seconds - possible API issue')), 10000)
+    );
+    
+    let createResult;
+    try {
+      createResult = await Promise.race([createPromise, timeoutPromise]) as any;
+      console.log('✅ [STEP 2/3] createUser returned (no timeout)');
+    } catch (timeoutError: any) {
+      if (timeoutError.message.includes('TIMEOUT')) {
+        console.error('❌ [STEP 2/3] CREATE USER TIMEOUT!');
+        console.error('💡 This suggests Supabase API is not responding.');
+        console.error('💡 Possible causes:');
+        console.error('   - Invalid SUPABASE_SERVICE_ROLE_KEY');
+        console.error('   - Network/firewall blocking Supabase');
+        console.error('   - Supabase project is paused/inactive');
+      }
+      throw timeoutError;
+    }
+    
+    const { data: newUserData, error: createError } = createResult;
     
     // Se la creazione ha avuto successo, ritorna il nuovo ID
     if (!createError && newUserData?.user) {

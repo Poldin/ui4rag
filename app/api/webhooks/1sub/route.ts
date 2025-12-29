@@ -83,8 +83,14 @@ export async function POST(request: NextRequest) {
       created: new Date(event.created * 1000).toISOString(),
     });
 
-    // Process event asynchronously (don't await - respond immediately)
-    processWebhookAsync(event).catch(error => {
+    // IMPORTANT: In serverless environments (Vercel), we MUST await the processing
+    // before returning the response. Fire-and-forget doesn't work because the
+    // process is killed when the HTTP response is sent.
+    try {
+      await processWebhookAsync(event);
+      console.log('✅ Webhook processed successfully');
+      return NextResponse.json({ received: true, processed: true }, { status: 200 });
+    } catch (error: any) {
       console.error('❌❌❌ CRITICAL ERROR processing webhook:', error);
       console.error('Error details:', {
         message: error.message,
@@ -92,10 +98,12 @@ export async function POST(request: NextRequest) {
         eventId: event.id,
         eventType: event.type,
       });
-    });
-
-    // Acknowledge receipt immediately
-    return NextResponse.json({ received: true }, { status: 200 });
+      // Return 500 so 1Sub will retry the webhook
+      return NextResponse.json(
+        { error: 'Processing failed', message: error.message },
+        { status: 500 }
+      );
+    }
     
   } catch (error) {
     console.error('Webhook endpoint error:', error);
