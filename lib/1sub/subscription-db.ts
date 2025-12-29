@@ -96,20 +96,65 @@ export async function updateSubscriptionPlan(
 }
 
 /**
- * Disattiva una subscription
+ * Disattiva una subscription immediatamente
  */
 export async function deactivateSubscription(supabaseUserId: string) {
+  console.log('🚫 [DB] Deactivating subscription for user:', supabaseUserId);
   const supabase = getSupabaseAdmin();
 
-  const { error } = await (supabase as any)
+  const { data, error } = await (supabase as any)
     .from('subscriptions')
-    .update({ is_active: false })
-    .eq('user_id', supabaseUserId);
+    .update({ 
+      is_active: false,
+      cancelled_at: new Date().toISOString(),
+      cancel_at: new Date().toISOString()
+    })
+    .eq('user_id', supabaseUserId)
+    .select()
+    .single();
 
   if (error) {
-    console.error('Error deactivating subscription:', error);
+    console.error('❌ [DB] Error deactivating subscription:', error);
     throw error;
   }
+  
+  console.log('✅ [DB] Subscription deactivated:', data);
+  return data;
+}
+
+/**
+ * Marca una subscription come cancellata (sarà disattivata in futuro)
+ */
+export async function markSubscriptionCancelled(
+  supabaseUserId: string,
+  cancelAt: Date,
+  reason?: string
+) {
+  console.log('📅 [DB] Marking subscription as cancelled:', {
+    userId: supabaseUserId,
+    cancelAt: cancelAt.toISOString(),
+    reason
+  });
+  const supabase = getSupabaseAdmin();
+
+  const { data, error } = await (supabase as any)
+    .from('subscriptions')
+    .update({ 
+      cancelled_at: new Date().toISOString(),
+      cancel_at: cancelAt.toISOString(),
+      // is_active rimane true fino alla data di scadenza
+    })
+    .eq('user_id', supabaseUserId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('❌ [DB] Error marking subscription cancelled:', error);
+    throw error;
+  }
+  
+  console.log('✅ [DB] Subscription marked as cancelled:', data);
+  return data;
 }
 
 /**

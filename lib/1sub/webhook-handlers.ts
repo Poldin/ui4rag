@@ -10,7 +10,7 @@ import {
   EntitlementRevokedData
 } from './types';
 import { syncUserFrom1Sub, getSupabaseUserIdByOneSub } from './user-sync';
-import { upsertSubscription, updateSubscriptionPlan, deactivateSubscription } from './subscription-db';
+import { upsertSubscription, updateSubscriptionPlan, deactivateSubscription, markSubscriptionCancelled } from './subscription-db';
 
 /**
  * Handlers for each webhook event type.
@@ -139,32 +139,46 @@ export async function handleSubscriptionCanceled(
   });
 
   try {
-    const now = new Date();
-    const effectiveDate = new Date(data.effectiveDate);
+    // Trova l'utente Supabase
+    console.log('🔍 Looking up user by 1Sub ID:', data.oneSubUserId);
+    let supabaseUserId = await getSupabaseUserIdByOneSub(data.oneSubUserId);
     
-    if (effectiveDate <= now) {
-      // Disattiva immediatamente
-      console.log('🚫 Revoking access immediately');
-      
-      const supabaseUserId = await getSupabaseUserIdByOneSub(data.oneSubUserId);
-      
-      if (supabaseUserId) {
-        await deactivateSubscription(supabaseUserId);
-      }
-      
-      console.log('✅ Subscription deactivated');
+    // Se non trovato per oneSubUserId, prova a sincronizzare con l'email
+    if (!supabaseUserId && data.userEmail) {
+      console.log('⚠️ User not found by 1Sub ID, trying to sync by email...');
+      supabaseUserId = await syncUserFrom1Sub(data.oneSubUserId, data.userEmail);
+    }
+    
+    if (!supabaseUserId) {
+      console.error('❌ Cannot find or create user for cancellation');
+      throw new Error(`User not found: ${data.oneSubUserId}`);
+    }
+    
+    console.log('✅ Found user:', supabaseUserId);
+    
+    const now = new Date();
+    const effectiveDate = data.effectiveDate ? new Date(data.effectiveDate) : null;
+    const isValidFutureDate = effectiveDate && !isNaN(effectiveDate.getTime()) && effectiveDate > now;
+    
+    if (isValidFutureDate) {
+      // Cancellazione programmata - l'accesso rimane attivo fino alla data
+      console.log('📅 Scheduled cancellation - access remains until:', effectiveDate);
+      await markSubscriptionCancelled(supabaseUserId, effectiveDate, data.cancellationReason);
+      console.log('✅ Subscription marked for future cancellation');
     } else {
-      // Disattiva alla fine del periodo
-      console.log('⏰ Access will be revoked at:', effectiveDate);
-      // TODO: Schedule deactivation
-      // await scheduleDeactivation(data.oneSubUserId, effectiveDate);
+      // Disattiva immediatamente (no effectiveDate o data nel passato)
+      console.log('🚫 Revoking access immediately');
+      await deactivateSubscription(supabaseUserId);
+      console.log('✅ Subscription deactivated immediately');
     }
     
     // Send email based on cancellation reason
     if (data.cancellationReason === 'user_requested') {
       // TODO: await sendCancellationConfirmationEmail(data.userEmail, effectiveDate);
+      console.log('📧 TODO: Send cancellation confirmation email');
     } else if (data.cancellationReason === 'payment_failed') {
       // TODO: await sendPaymentFailedEmail(data.userEmail);
+      console.log('📧 TODO: Send payment failed email');
     }
     
   } catch (error) {
