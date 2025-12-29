@@ -23,17 +23,50 @@ function getSupabaseAdmin() {
 }
 
 /**
+ * Metadata generico per la subscription (usato sia per activation che cancellation)
+ */
+export interface SubscriptionMetadata {
+  // Info da 1Sub
+  oneSubUserId?: string;
+  userEmail?: string;
+  planId?: string;
+  productId?: string;
+  status?: string;
+  quantity?: number;
+  
+  // Info periodo
+  currentPeriodStart?: string;
+  currentPeriodEnd?: string;
+  trialEndsAt?: string | null;
+  
+  // Info cancellazione
+  cancellationReason?: string;
+  effectiveDate?: string;
+  canceledAt?: string;
+  
+  // Evento originale
+  eventType?: string;
+  eventId?: string;
+  eventCreated?: string;
+  
+  // Dati extra
+  [key: string]: any;
+}
+
+/**
  * Crea o aggiorna una subscription
  */
 export async function upsertSubscription(
   supabaseUserId: string,
   planId: string,
-  isActive: boolean = true
+  isActive: boolean = true,
+  metadata?: SubscriptionMetadata
 ) {
   console.log('💾 [DB] Starting upsert subscription:', {
     userId: supabaseUserId,
     plan: planId,
-    isActive
+    isActive,
+    hasMetadata: !!metadata
   });
 
   try {
@@ -46,6 +79,10 @@ export async function upsertSubscription(
         user_id: supabaseUserId,
         plan: planId,
         is_active: isActive,
+        metadata: metadata || null,
+        // Reset cancellation fields on activation
+        cancelled_at: null,
+        cancel_at: null,
       }, {
         onConflict: 'user_id',
       })
@@ -80,34 +117,47 @@ export async function upsertSubscription(
  */
 export async function updateSubscriptionPlan(
   supabaseUserId: string,
-  newPlanId: string
+  newPlanId: string,
+  metadata?: SubscriptionMetadata
 ) {
-  const supabase = getSupabaseAdmin();
-
-  const { error } = await (supabase as any)
-    .from('subscriptions')
-    .update({ plan: newPlanId })
-    .eq('user_id', supabaseUserId);
-
-  if (error) {
-    console.error('Error updating subscription plan:', error);
-    throw error;
-  }
-}
-
-/**
- * Disattiva una subscription immediatamente
- */
-export async function deactivateSubscription(supabaseUserId: string) {
-  console.log('🚫 [DB] Deactivating subscription for user:', supabaseUserId);
   const supabase = getSupabaseAdmin();
 
   const { data, error } = await (supabase as any)
     .from('subscriptions')
     .update({ 
+      plan: newPlanId,
+      metadata: metadata || undefined,
+    })
+    .eq('user_id', supabaseUserId)
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error updating subscription plan:', error);
+    throw error;
+  }
+  
+  return data;
+}
+
+/**
+ * Disattiva una subscription immediatamente
+ */
+export async function deactivateSubscription(
+  supabaseUserId: string,
+  metadata?: SubscriptionMetadata
+) {
+  console.log('🚫 [DB] Deactivating subscription for user:', supabaseUserId);
+  const supabase = getSupabaseAdmin();
+
+  const now = new Date().toISOString();
+  const { data, error } = await (supabase as any)
+    .from('subscriptions')
+    .update({ 
       is_active: false,
-      cancelled_at: new Date().toISOString(),
-      cancel_at: new Date().toISOString()
+      cancelled_at: now,
+      cancel_at: now,
+      metadata: metadata || undefined,
     })
     .eq('user_id', supabaseUserId)
     .select()
@@ -128,12 +178,12 @@ export async function deactivateSubscription(supabaseUserId: string) {
 export async function markSubscriptionCancelled(
   supabaseUserId: string,
   cancelAt: Date,
-  reason?: string
+  metadata?: SubscriptionMetadata
 ) {
   console.log('📅 [DB] Marking subscription as cancelled:', {
     userId: supabaseUserId,
     cancelAt: cancelAt.toISOString(),
-    reason
+    metadata
   });
   const supabase = getSupabaseAdmin();
 
@@ -142,6 +192,7 @@ export async function markSubscriptionCancelled(
     .update({ 
       cancelled_at: new Date().toISOString(),
       cancel_at: cancelAt.toISOString(),
+      metadata: metadata || undefined,
       // is_active rimane true fino alla data di scadenza
     })
     .eq('user_id', supabaseUserId)
@@ -165,7 +216,7 @@ export async function hasActiveSubscription(userId: string): Promise<boolean> {
 
   const { data, error } = await (supabase as any)
     .from('subscriptions')
-    .select('is_active')
+    .select('is_active, cancel_at')
     .eq('user_id', userId)
     .eq('is_active', true)
     .single();
@@ -175,6 +226,12 @@ export async function hasActiveSubscription(userId: string): Promise<boolean> {
     return false;
   }
 
-  return !!data;
-}
+  if (!data) return false;
+  
+  // Se c'è una data di cancellazione e siamo oltre quella data, non è attivo
+  if (data.cancel_at && new Date(data.cancel_at) <= new Date()) {
+    return false;
+  }
 
+  return true;
+}

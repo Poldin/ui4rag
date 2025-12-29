@@ -10,7 +10,7 @@ import {
   EntitlementRevokedData
 } from './types';
 import { syncUserFrom1Sub, getSupabaseUserIdByOneSub } from './user-sync';
-import { upsertSubscription, updateSubscriptionPlan, deactivateSubscription, markSubscriptionCancelled } from './subscription-db';
+import { upsertSubscription, updateSubscriptionPlan, deactivateSubscription, markSubscriptionCancelled, SubscriptionMetadata } from './subscription-db';
 
 /**
  * Handlers for each webhook event type.
@@ -48,12 +48,29 @@ export async function handleSubscriptionActivated(
       email: data.userEmail,
     });
 
-    // 2. Crea/aggiorna record nella tabella subscriptions
+    // 2. Crea/aggiorna record nella tabella subscriptions con tutti i metadata
     console.log('💾 Creating/updating subscription in DB...');
+    
+    const metadata: SubscriptionMetadata = {
+      oneSubUserId: data.oneSubUserId,
+      userEmail: data.userEmail,
+      planId: data.planId,
+      productId: data.productId,
+      status: data.status,
+      quantity: data.quantity,
+      currentPeriodStart: data.currentPeriodStart,
+      currentPeriodEnd: data.currentPeriodEnd,
+      trialEndsAt: data.trialEndsAt,
+      eventType: event.type,
+      eventId: event.id,
+      eventCreated: new Date(event.created * 1000).toISOString(),
+    };
+    
     const subscriptionData = await upsertSubscription(
       supabaseUserId,
       data.planId,
-      true // is_active
+      true, // is_active
+      metadata
     );
     
     console.log('💾 Subscription data saved:', subscriptionData);
@@ -92,21 +109,44 @@ export async function handleSubscriptionUpdated(
   });
 
   try {
+    // Prepara tutti i metadata
+    const metadata: SubscriptionMetadata = {
+      oneSubUserId: data.oneSubUserId,
+      userEmail: data.userEmail,
+      planId: data.planId,
+      productId: data.productId,
+      status: data.status,
+      quantity: data.quantity,
+      currentPeriodStart: data.currentPeriodStart,
+      currentPeriodEnd: data.currentPeriodEnd,
+      previousPlanId: data.previousPlanId,
+      previousStatus: data.previousStatus,
+      previousQuantity: data.previousQuantity,
+      eventType: event.type,
+      eventId: event.id,
+      eventCreated: new Date(event.created * 1000).toISOString(),
+    };
+    
+    // Trova l'utente Supabase dal oneSubUserId
+    const supabaseUserId = await getSupabaseUserIdByOneSub(data.oneSubUserId);
+    
+    if (!supabaseUserId) {
+      console.warn('⚠️ User not found for subscription update:', data.oneSubUserId);
+      return;
+    }
+    
     // Handle plan changes (upgrade/downgrade)
     if (data.previousPlanId && data.previousPlanId !== data.planId) {
       console.log(`📦 Plan changed: ${data.previousPlanId} → ${data.planId}`);
-      
-      // Trova l'utente Supabase dal oneSubUserId
-      const supabaseUserId = await getSupabaseUserIdByOneSub(data.oneSubUserId);
-      
-      if (supabaseUserId) {
-        await updateSubscriptionPlan(supabaseUserId, data.planId);
-      }
-      
+      await updateSubscriptionPlan(supabaseUserId, data.planId, metadata);
       console.log('✅ Plan updated in database');
       
       // TODO: Send email notification
       // await sendPlanChangeEmail(data.userEmail, data.planId, data.previousPlanId);
+    } else {
+      // Aggiorna comunque i metadata anche se il piano non è cambiato
+      await updateSubscriptionPlan(supabaseUserId, data.planId, metadata);
+      console.log('✅ Subscription metadata updated in database');
     }
     
     // Handle trial conversion
@@ -156,6 +196,21 @@ export async function handleSubscriptionCanceled(
     
     console.log('✅ Found user:', supabaseUserId);
     
+    // Prepara tutti i metadata
+    const metadata: SubscriptionMetadata = {
+      oneSubUserId: data.oneSubUserId,
+      userEmail: data.userEmail,
+      planId: data.planId,
+      productId: data.productId,
+      status: data.status,
+      cancellationReason: data.cancellationReason,
+      effectiveDate: data.effectiveDate,
+      canceledAt: data.canceledAt,
+      eventType: event.type,
+      eventId: event.id,
+      eventCreated: new Date(event.created * 1000).toISOString(),
+    };
+    
     const now = new Date();
     const effectiveDate = data.effectiveDate ? new Date(data.effectiveDate) : null;
     const isValidFutureDate = effectiveDate && !isNaN(effectiveDate.getTime()) && effectiveDate > now;
@@ -163,12 +218,12 @@ export async function handleSubscriptionCanceled(
     if (isValidFutureDate) {
       // Cancellazione programmata - l'accesso rimane attivo fino alla data
       console.log('📅 Scheduled cancellation - access remains until:', effectiveDate);
-      await markSubscriptionCancelled(supabaseUserId, effectiveDate, data.cancellationReason);
+      await markSubscriptionCancelled(supabaseUserId, effectiveDate, metadata);
       console.log('✅ Subscription marked for future cancellation');
     } else {
       // Disattiva immediatamente (no effectiveDate o data nel passato)
       console.log('🚫 Revoking access immediately');
-      await deactivateSubscription(supabaseUserId);
+      await deactivateSubscription(supabaseUserId, metadata);
       console.log('✅ Subscription deactivated immediately');
     }
     
@@ -255,11 +310,23 @@ export async function handleEntitlementRevoked(
   });
 
   try {
+    // Prepara tutti i metadata
+    const metadata: SubscriptionMetadata = {
+      oneSubUserId: data.oneSubUserId,
+      userEmail: data.userEmail,
+      status: data.status,
+      cancellationReason: data.reason,
+      revokedAt: data.revokedAt,
+      eventType: event.type,
+      eventId: event.id,
+      eventCreated: new Date(event.created * 1000).toISOString(),
+    };
+    
     // Revoca immediata dell'accesso
     const supabaseUserId = await getSupabaseUserIdByOneSub(data.oneSubUserId);
     
     if (supabaseUserId) {
-      await deactivateSubscription(supabaseUserId);
+      await deactivateSubscription(supabaseUserId, metadata);
       console.log('✅ User access revoked immediately');
     } else {
       console.warn('⚠️ User not found in database');
