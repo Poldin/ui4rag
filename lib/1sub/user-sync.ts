@@ -43,6 +43,7 @@ function getSupabaseAdmin() {
 
 /**
  * Crea o recupera un utente Supabase da un evento 1Sub
+ * Approccio ottimizzato: tenta di creare l'utente direttamente
  * 
  * @param oneSubUserId - ID utente da 1Sub
  * @param userEmail - Email dell'utente
@@ -56,114 +57,93 @@ export async function syncUserFrom1Sub(
   console.log('🔄 [SYNC START] Syncing user from 1Sub:', { oneSubUserId, userEmail });
 
   try {
-    console.log('📡 [STEP 1/5] Getting Supabase admin client...');
+    console.log('📡 [STEP 1/3] Getting Supabase admin client...');
     const supabase = getSupabaseAdmin();
-    console.log('✅ [STEP 1/5] Supabase admin client ready');
+    console.log('✅ [STEP 1/3] Supabase admin client ready');
     
-    // 1. Controlla se esiste già un utente con questa email
-    console.log('🔍 [STEP 2/5] Listing existing users from Supabase Auth...');
-    let listResult;
-    try {
-      listResult = await supabase.auth.admin.listUsers();
-      console.log('✅ [STEP 2/5] listUsers() completed');
-    } catch (listErr) {
-      console.error('❌ [STEP 2/5] FAILED to list users:', listErr);
-      throw listErr;
-    }
+    // Approccio ottimizzato: prova a creare l'utente direttamente
+    // Se esiste già, gestisci l'errore e aggiorna i metadati
+    console.log('➕ [STEP 2/3] Attempting to create user...');
     
-    const { data: existingUsers, error: listError } = listResult;
+    const createPayload = {
+      email: userEmail,
+      email_confirm: true, // Auto-confirm email
+      user_metadata: {
+        onesub_user_id: oneSubUserId,
+        created_from: '1sub_webhook',
+        created_at: new Date().toISOString(),
+      }
+    };
     
-    if (listError) {
-      console.error('❌ [STEP 2/5] Error in listUsers response:', {
-        error: listError,
-        message: listError.message,
-        status: listError.status
+    console.log('📝 [STEP 2/3] Creating user with payload:', {
+      email: userEmail,
+      email_confirm: true,
+      metadata_keys: Object.keys(createPayload.user_metadata)
+    });
+    
+    const { data: newUserData, error: createError } = await supabase.auth.admin.createUser(createPayload);
+    
+    // Se la creazione ha avuto successo, ritorna il nuovo ID
+    if (!createError && newUserData?.user) {
+      const duration = Date.now() - startTime;
+      console.log(`✅ [SYNC COMPLETE] New user created in ${duration}ms:`, {
+        id: newUserData.user.id,
+        email: newUserData.user.email
       });
-      throw listError;
+      return newUserData.user.id;
     }
-
-    console.log(`📋 [STEP 3/5] Found ${existingUsers.users.length} total users in Supabase Auth`);
-    console.log(`🔍 [STEP 3/5] Searching for email: ${userEmail}...`);
-    const existingUser = existingUsers.users.find(u => u.email === userEmail);
-
-    if (existingUser) {
-      console.log('✅ [STEP 3/5] User already exists!', {
-        id: existingUser.id,
-        email: existingUser.email,
-        hasOneSubId: !!existingUser.user_metadata?.onesub_user_id
+    
+    // Se l'errore indica che l'utente esiste già
+    if (createError && (createError.message?.includes('already') || createError.message?.includes('exists') || createError.status === 422)) {
+      console.log('ℹ️ [STEP 2/3] User already exists, fetching by email...');
+      
+      // Cerca l'utente esistente
+      console.log('🔍 [STEP 3/3] Listing users to find existing user...');
+      const { data: usersData, error: listError } = await supabase.auth.admin.listUsers();
+      
+      if (listError) {
+        console.error('❌ [STEP 3/3] Error listing users:', listError);
+        throw listError;
+      }
+      
+      console.log(`📋 [STEP 3/3] Found ${usersData.users.length} total users, searching for ${userEmail}...`);
+      const existingUser = usersData.users.find(u => u.email === userEmail);
+      
+      if (!existingUser) {
+        console.error('❌ [STEP 3/3] User should exist but not found!');
+        throw new Error(`User ${userEmail} should exist but was not found`);
+      }
+      
+      console.log('✅ [STEP 3/3] Found existing user:', existingUser.id);
+      
+      // Aggiorna i metadati dell'utente esistente
+      console.log('🔄 [STEP 3/3] Updating existing user metadata with oneSubUserId...');
+      const updateResult = await supabase.auth.admin.updateUserById(existingUser.id, {
+        user_metadata: {
+          ...existingUser.user_metadata,
+          onesub_user_id: oneSubUserId,
+        }
       });
       
-      console.log('🔄 [STEP 4/5] Updating user metadata with oneSubUserId...');
-      try {
-        const updateResult = await supabase.auth.admin.updateUserById(existingUser.id, {
-          user_metadata: {
-            ...existingUser.user_metadata,
-            onesub_user_id: oneSubUserId,
-          }
-        });
-        
-        if (updateResult.error) {
-          console.error('❌ [STEP 4/5] Error updating user metadata:', updateResult.error);
-        } else {
-          console.log('✅ [STEP 4/5] User metadata updated successfully');
-        }
-      } catch (updateErr) {
-        console.error('❌ [STEP 4/5] Exception updating user:', updateErr);
+      if (updateResult.error) {
+        console.error('⚠️ [STEP 3/3] Error updating user metadata:', updateResult.error);
+      } else {
+        console.log('✅ [STEP 3/3] User metadata updated successfully');
       }
 
       const duration = Date.now() - startTime;
       console.log(`✅ [SYNC COMPLETE] Existing user synced in ${duration}ms:`, existingUser.id);
       return existingUser.id;
     }
-
-    // 2. Crea nuovo utente se non esiste
-    console.log('➕ [STEP 4/5] User NOT found, creating new user...');
-    console.log('📝 [STEP 4/5] Creating user with:', {
-      email: userEmail,
-      email_confirm: true,
-      metadata_keys: ['onesub_user_id', 'created_from', 'created_at']
-    });
     
-    let createResult;
-    try {
-      createResult = await supabase.auth.admin.createUser({
-        email: userEmail,
-        email_confirm: true, // Auto-confirm email
-        user_metadata: {
-          onesub_user_id: oneSubUserId,
-          created_from: '1sub_webhook',
-          created_at: new Date().toISOString(),
-        }
-      });
-      console.log('✅ [STEP 4/5] createUser() call completed');
-    } catch (createErr) {
-      console.error('❌ [STEP 4/5] FAILED to create user:', createErr);
-      throw createErr;
-    }
-
-    const { data: newUser, error: createError } = createResult;
-
-    if (createError) {
-      console.error('❌ [STEP 4/5] Error in createUser response:', {
-        error: createError,
-        message: createError.message,
-        status: createError.status
-      });
-      throw createError;
-    }
-
-    if (!newUser || !newUser.user) {
-      console.error('❌ [STEP 4/5] No user data returned from createUser');
-      throw new Error('No user data returned from createUser');
-    }
-
-    const duration = Date.now() - startTime;
-    console.log(`✅ [SYNC COMPLETE] New user created in ${duration}ms:`, {
-      id: newUser.user.id,
-      email: newUser.user.email
+    // Altri tipi di errore
+    console.error('❌ [STEP 2/3] Unexpected error creating user:', {
+      error: createError,
+      message: createError?.message,
+      status: createError?.status,
+      code: createError?.code
     });
-    
-    return newUser.user.id;
+    throw createError || new Error('Unknown error creating user');
 
   } catch (error: any) {
     const duration = Date.now() - startTime;
@@ -222,4 +202,3 @@ export async function getOneSubIdBySupabaseUser(
     return null;
   }
 }
-
