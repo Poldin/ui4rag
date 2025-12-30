@@ -17,6 +17,7 @@ export async function middleware(request: NextRequest) {
     '/terms',
     '/privacy',
     '/contact',
+    '/auth/magic', // 1Sub Magic Login
   ];
 
   // Controlla se la route è pubblica
