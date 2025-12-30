@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { verifyMagicLogin } from '@/lib/1sub/magic-login';
-import type { Database } from '@/lib/database_types';
+import { hasActiveSubscription } from '@/lib/1sub/subscription-db';
 
 /**
  * Magic Login endpoint for 1Sub
@@ -21,7 +21,7 @@ function getSupabaseAdmin() {
     throw new Error('Missing Supabase credentials');
   }
 
-  return createClient<Database>(supabaseUrl, supabaseServiceKey, {
+  return createClient(supabaseUrl, supabaseServiceKey, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
@@ -85,25 +85,16 @@ export async function GET(request: NextRequest) {
     console.log('✅ [Magic Login] Found user:', { id: user.id, email: user.email });
 
     // 3. Check if user has an active subscription
-    // Query the subscriptions table to verify active status
-    const { data: subscription, error: subError } = await supabase
-      .from('subscriptions')
-      .select('is_active, plan_id')
-      .eq('user_id', user.id)
-      .single();
+    const isActive = await hasActiveSubscription(user.id);
 
-    if (subError && subError.code !== 'PGRST116') { // PGRST116 = no rows
-      console.error('❌ [Magic Login] Error checking subscription:', subError);
-    }
-
-    if (!subscription?.is_active) {
+    if (!isActive) {
       console.warn('⚠️ [Magic Login] User has no active subscription:', user.id);
       return NextResponse.redirect(
         new URL('/signin?error=Subscription+inactive.+Please+renew+on+1Sub.', baseUrl)
       );
     }
 
-    console.log('✅ [Magic Login] User has active subscription:', subscription.plan_id);
+    console.log('✅ [Magic Login] User has active subscription');
 
     // 4. Generate a magic link for the user
     // This creates a one-time use link that will establish the Supabase session
