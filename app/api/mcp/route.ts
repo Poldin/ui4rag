@@ -275,7 +275,10 @@ Use mode="hybrid" (default) for most queries - it finds both conceptually simila
 Use mode="semantic" when searching for concepts, paraphrases, or when the exact wording is unknown.
 Use mode="keyword" when searching for specific terms, codes, names, or exact phrases.
 
-Returns chunks with relevance scores (semantic_score, keyword_score, combined_score) and match_type indicating how the result was found.`,
+Returns chunks with:
+- chunkId: use this with get_context to expand a specific chunk
+- sourceId: use this with get_document to get the full document
+- relevance scores (semanticScore, keywordScore, combinedScore) and matchType`,
       inputSchema: {
         type: 'object',
         properties: {
@@ -300,8 +303,9 @@ Returns chunks with relevance scores (semantic_score, keyword_score, combined_sc
     },
     {
       name: 'get_context',
-      description: `Retrieves surrounding context for a specific search result. Use this when a search result seems relevant but you need more context to fully understand or answer the user's question.
+      description: `Retrieves surrounding context for a specific chunk. Use this when a search result seems relevant but you need more context.
 
+IMPORTANT: Use the "chunkId" field from search results, NOT the "sourceId".
 The window parameter controls how many chunks before and after to retrieve (default: 2).
 Returns the target chunk plus adjacent chunks from the same document, ordered by position.`,
       inputSchema: {
@@ -309,7 +313,7 @@ Returns the target chunk plus adjacent chunks from the same document, ordered by
         properties: {
           chunkId: {
             type: 'string',
-            description: 'The UUID of the chunk to expand (from search results)',
+            description: 'The chunkId from search results (NOT sourceId). Use sourceId for get_document instead.',
           },
           window: {
             type: 'number',
@@ -322,13 +326,16 @@ Returns the target chunk plus adjacent chunks from the same document, ordered by
     },
     {
       name: 'get_document',
-      description: 'Get a full document by its source ID, including all chunks. Use this when you need the complete document content.',
+      description: `Get a full document by its sourceId (NOT chunkId). Use this when you need the complete document content.
+
+IMPORTANT: Use the "sourceId" field from search results, NOT the "chunkId". 
+The chunkId is for individual chunks, sourceId is for the full document.`,
       inputSchema: {
         type: 'object',
         properties: {
           sourceId: {
             type: 'string',
-            description: 'The UUID of the source document',
+            description: 'The sourceId from search results (UUID of the source document). Do NOT use chunkId here.',
           },
         },
         required: ['sourceId'],
@@ -446,8 +453,8 @@ async function executeTool(
                 mode: searchMode,
                 count: results.length,
                 results: results.map((r) => ({
-                  id: r.chunkId,
-                  sourceId: r.sourceId,
+                  chunkId: r.chunkId,  // ID del chunk (usa con get_context)
+                  sourceId: r.sourceId, // ID del documento (usa con get_document)
                   sourceTitle: r.sourceTitle,
                   sourceType: r.sourceType,
                   content: r.chunkContent,
@@ -518,33 +525,70 @@ async function executeTool(
           );
         }
 
-        const data = await ragStorage.getSourceWithChunks(sourceId);
+        // Validazione formato UUID
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(sourceId)) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  error: 'Invalid sourceId format',
+                  message: `The provided sourceId "${sourceId}" is not a valid UUID. Make sure you're using the "sourceId" field from search results, not "chunkId" or other fields.`,
+                  hint: 'sourceId should look like: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+                }, null, 2),
+              },
+            ],
+          };
+        }
 
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                source: {
-                  id: data.source.id,
-                  title: data.source.title,
-                  sourceType: data.source.source_type,
-                  content: data.source.content,
-                  metadata: data.source.metadata,
-                  createdAt: data.source.created_at,
-                  updatedAt: data.source.updated_at,
+        try {
+          const data = await ragStorage.getSourceWithChunks(sourceId);
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  source: {
+                    id: data.source.id,
+                    title: data.source.title,
+                    sourceType: data.source.source_type,
+                    content: data.source.content,
+                    metadata: data.source.metadata,
+                    createdAt: data.source.created_at,
+                    updatedAt: data.source.updated_at,
+                  },
+                  chunks: data.chunks.map((c) => ({
+                    chunkId: c.id,
+                    content: c.content,
+                    chunkIndex: c.chunk_index,
+                    chunkTotal: c.chunk_total,
+                    metadata: c.metadata,
+                  })),
+                }, null, 2),
+              },
+            ],
+          };
+        } catch (error: any) {
+          // Gestisci errore "source not found" in modo graceful
+          if (error.message?.includes('not found')) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    error: 'Document not found',
+                    sourceId,
+                    message: `No document found with sourceId "${sourceId}". This might be a chunkId instead of a sourceId. Use the "sourceId" field from search results.`,
+                    hint: 'Run a search first and use the sourceId from the results.',
+                  }, null, 2),
                 },
-                chunks: data.chunks.map((c) => ({
-                  id: c.id,
-                  content: c.content,
-                  chunkIndex: c.chunk_index,
-                  chunkTotal: c.chunk_total,
-                  metadata: c.metadata,
-                })),
-              }, null, 2),
-            },
-          ],
-        };
+              ],
+            };
+          }
+          throw error;
+        }
       }
 
       case 'list_sources': {
